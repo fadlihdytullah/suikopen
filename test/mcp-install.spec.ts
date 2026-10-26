@@ -35,3 +35,15 @@ describe('installIntoGemini', () => {
     expect((await installIntoGemini(path, 29980)).changed).toBe(false)
   })
 })
+
+describe('security guards', async () => {
+  const { allowedRequest } = await import('../src/main/mcp/server')
+
+  it('accepts only local hosts and origins', () => {
+    expect(allowedRequest(undefined, '127.0.0.1:29980', 29980)).toBe(true)
+    expect(allowedRequest('http://localhost:5173', 'localhost:29980', 29980)).toBe(true)
+    expect(allowedRequest('http://localhost.evil.com', '127.0.0.1:29980', 29980)).toBe(false)
+    expect(allowedRequest(undefined, 'evil.com:29980', 29980)).toBe(false)
+    expect(allowedRequest('http://127.0.0.1.evil.com', 'localhost:29980', 29980)).toBe(false)
+  })
+})

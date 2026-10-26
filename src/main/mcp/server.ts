@@ -162,15 +162,28 @@ export function createMcpServer(): McpServer {
   return server
 }
 
-function allowed(origin: string | undefined): boolean {
-  return origin === undefined || origin.startsWith('http://127.0.0.1') || origin.startsWith('http://localhost')
+const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]'])
+
+export function allowedRequest(origin: string | undefined, host: string | undefined, port: number): boolean {
+  if (!host || !LOCAL_HOSTS.has(host.replace(new RegExp(`:${port}$`), ''))) {
+    return false
+  }
+  if (origin === undefined) {
+    return true
+  }
+  try {
+    const parsed = new URL(origin)
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && LOCAL_HOSTS.has(parsed.hostname)
+  } catch {
+    return false
+  }
 }
 
 export async function startMcpServer(port = MCP_PORT): Promise<{ http: Server; close: () => Promise<void> }> {
   registerBridge()
 
   const http = createServer((request, response) => {
-    if (!allowed(request.headers.origin)) {
+    if (!allowedRequest(request.headers.origin, request.headers.host, port)) {
       response.writeHead(403).end('Forbidden')
       return
     }

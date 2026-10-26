@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { readFile, realpath } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, net } from 'electron'
 import { readDocument, writeDocument } from './file-io'
 import type { Document } from '../shared/schema/document'
@@ -145,20 +145,29 @@ function fetchRemoteAsset(url: string): Promise<Asset | null> {
   return pending
 }
 
+const IMAGE_EXTENSION = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i
+
+export function insideRoot(root: string, target: string): boolean {
+  const path = relative(root, target)
+  return path !== '' && !path.startsWith('..') && !isAbsolute(path)
+}
+
 export function registerAssetHandlers(): void {
   ipcMain.handle('asset:read', async (_event, request: { base: string | null; url: string }): Promise<Asset | null> => {
     if (/^https:\/\//i.test(request.url)) {
       return fetchRemoteAsset(request.url)
     }
 
-    const root = request.base ? dirname(request.base) : app.getAppPath()
-    const target = isAbsolute(request.url) ? request.url : resolve(root, request.url)
-
-    if (!target.startsWith(resolve(root))) {
+    if (!IMAGE_EXTENSION.test(request.url)) {
       return null
     }
 
     try {
+      const root = await realpath(request.base ? dirname(request.base) : app.getAppPath())
+      const target = await realpath(resolve(root, request.url))
+      if (!insideRoot(root, target)) {
+        return null
+      }
       const bytes = await readFile(target)
       return {
         bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
