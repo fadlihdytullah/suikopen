@@ -3,6 +3,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { z } from 'zod'
 import { callEditor, captureWindow, registerBridge } from './bridge'
+import { GUIDES, GUIDE_TOPICS } from '../agent/guides'
+import { MCP_INSTRUCTIONS } from '../agent/prompt'
+import { styleDetail, styleList, STYLES } from '../agent/styles'
+import { findIcons, ICON_SETS } from './icons'
 
 export const MCP_PORT = 29980
 export const MCP_PATH = '/mcp'
@@ -24,6 +28,13 @@ export const TOOL_NAMES = [
   'set_theme',
   'detach_instance',
   'screenshot',
+  'get_guide',
+  'batch',
+  'get_variables',
+  'export_code',
+  'set_variables',
+  'get_style',
+  'find_icons',
 ] as const
 
 function text(value: unknown) {
@@ -39,7 +50,92 @@ function tool(method: string, params: Record<string, unknown> = {}) {
 }
 
 export function createMcpServer(): McpServer {
-  const server = new McpServer({ name: 'suikopen', version: '0.1.0' })
+  const server = new McpServer({ name: 'suikopen', version: '0.1.0' }, { instructions: MCP_INSTRUCTIONS })
+
+  server.registerTool(
+    'get_guide',
+    {
+      description:
+        'Design guidance for one kind of output. Call once before building: web-app, landing-page, mobile-app, slides, dashboard (also tables), components (design systems), design-to-code (turning a design into project code), or schema (the node format).',
+      inputSchema: { topic: z.enum(GUIDE_TOPICS) },
+    },
+    ({ topic }) => ({ content: [{ type: 'text' as const, text: GUIDES[topic] }] })
+  )
+
+  server.registerTool(
+    'batch',
+    {
+      description:
+        'Run several edits as one step: one undo for the user, and nothing is applied if any operation fails. Each op is {"tool": "create_node" | "update_node" | "move_node" | "set_text" | "delete_nodes", ...that tool\'s parameters}. Later ops can use ids created by earlier ones. Returns each result and any layout problems in the touched screens. Use it for one section at a time so the user sees progress.',
+      inputSchema: {
+        ops: z
+          .array(z.looseObject({ tool: z.enum(['create_node', 'update_node', 'move_node', 'set_text', 'delete_nodes']) }))
+          .min(1)
+          .max(200),
+      },
+    },
+    ({ ops }) => tool('batch', { ops })
+  )
+
+  server.registerTool(
+    'get_variables',
+    {
+      description: 'Design tokens declared by the document (colours, numbers, strings) with their theme variants, plus the same tokens as CSS custom properties.',
+      inputSchema: {},
+    },
+    () => tool('get_variables')
+  )
+
+  server.registerTool(
+    'export_code',
+    {
+      description:
+        'Turn a node and everything inside it into HTML, as a starting point for project code. format "html-tailwind" (default) gives Tailwind classes; "html-css" gives class names plus a stylesheet. Variables stay as CSS custom properties (var(--name)), defined in "css". Also lists fonts and image URLs used. Adapt the result to the project\'s framework and components; call get_guide("design-to-code") first.',
+      inputSchema: { id: z.string(), format: z.enum(['html-tailwind', 'html-css']).optional() },
+    },
+    ({ id, format }) => tool('export_code', { id, format })
+  )
+
+  server.registerTool(
+    'set_variables',
+    {
+      description:
+        'Add or change design tokens. Each variable is {"type": "color" | "number" | "string" | "boolean", "value": v} or, for theme variants, {"type": "color", "value": [{"value": "#fff"}, {"value": "#000", "theme": {"mode": "dark"}}]}. Merges with existing variables unless replace is true. Theme axes are declared automatically.',
+      inputSchema: { variables: z.record(z.string(), z.unknown()), replace: z.boolean().optional() },
+    },
+    ({ variables, replace }) => tool('set_variables', { variables, replace })
+  )
+
+  server.registerTool(
+    'get_style',
+    {
+      description: `Ready-made visual styles (fonts, colour tokens with light and dark values, type scale, radius, layout notes) for when the user has no brand. Without a name, lists them: ${STYLES.map((style) => style.name).join(', ')}. With a name, returns the full style and variables ready for set_variables.`,
+      inputSchema: { name: z.string().optional() },
+    },
+    ({ name }) => {
+      try {
+        return text(name ? styleDetail(name) : styleList())
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
+
+  server.registerTool(
+    'find_icons',
+    {
+      description:
+        'Search an icon set and get SVG URLs. Put an icon in a small rectangle (16-24) whose only fill is {"type":"image","url":"<url>","mode":"contain"}. Change the colour by editing the url\'s color parameter (url-encoded hex, %23 for #). Sets: lucide (default, UI icons), tabler, ph (Phosphor), mdi, simple-icons (brand logos).',
+      inputSchema: { query: z.string().min(1), set: z.enum(ICON_SETS).optional(), limit: z.number().int().min(1).max(32).optional() },
+    },
+    async ({ query, set, limit }) => {
+      try {
+        return text(await findIcons((url) => fetch(url, { signal: AbortSignal.timeout(10_000) }), query, set, limit))
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
 
   server.registerTool(
     'get_document_info',
@@ -146,13 +242,23 @@ export function createMcpServer(): McpServer {
   server.registerTool(
     'screenshot',
     {
-      description: 'PNG of one node rendered on its own at 2x, wherever it sits on the canvas. Without an id, the whole editor window.',
+      description:
+        'PNG of one node rendered on its own at 2x, wherever it sits on the canvas, plus any layout problems found inside it. Without an id, the whole editor window.',
       inputSchema: { id: z.string().optional() },
     },
     async ({ id }) => {
       try {
-        const data = id ? ((await callEditor('render_node', { id })) as { png: string }).png : await captureWindow()
-        return { content: [{ type: 'image' as const, data, mimeType: 'image/png' }] }
+        if (!id) {
+          return { content: [{ type: 'image' as const, data: await captureWindow(), mimeType: 'image/png' }] }
+        }
+        const { png } = (await callEditor('render_node', { id })) as { png: string }
+        const problems = (await callEditor('get_problems', { id })) as unknown[]
+        return {
+          content: [
+            { type: 'image' as const, data: png, mimeType: 'image/png' },
+            { type: 'text' as const, text: problems.length ? JSON.stringify({ problems }, null, 2) : 'No layout problems found.' },
+          ],
+        }
       } catch (error) {
         return failure(error)
       }

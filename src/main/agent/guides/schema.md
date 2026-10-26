@@ -1,0 +1,10 @@
+Node schema (JSON, as accepted by create_node and update_node):
+- Every node: id, type, x, y, width, height. width and height are a number, "fit_content", "fill_container", or either with a fallback such as "fit_content(200)". Optional: name, fill, stroke, effect, visible (false hides the layer), locked (true stops canvas selection).
+- type "frame": children (array), layout ("none" | "vertical" | "horizontal"), gap, padding (number, [vertical, horizontal], or [top, right, bottom, left]), justifyContent ("start" | "center" | "end" | "space_between" | "space_around"), alignItems ("start" | "center" | "end"), cornerRadius (number or [tl, tr, br, bl]). A frame with layout "none" and "fit_content" size collapses; give it a number.
+- type "group": children. type "rectangle": cornerRadius. type "ellipse".
+- type "text": content, fontFamily (any Google Fonts family such as "Inter", "Fraunces" or "Space Grotesk", downloaded on first use, or a font installed on this computer; unknown names fall back to Arial), fontSize, fontWeight (100 to 900), fontStyle ("normal" | "italic"), letterSpacing, lineHeight (a multiplier such as 1.4), textAlign ("left" | "center" | "right"). The text colour is its fill, a hex string.
+- type "ref": masterId (id of the node to instance), overrides (map of master-relative path such as "master/label" to properties).
+- fill: a hex colour "#RRGGBB" or "#RRGGBBAA", a variable "$name", or an object: {"type":"gradient","gradientType":"linear"|"radial"|"angular","rotation":45,"colors":[{"color":"#..","position":0},{"color":"#..","position":1}]}, or {"type":"image","url":"./file.png","mode":"cover"}. An array of fills stacks them.
+- stroke: {"color":"#..","width":1,"align":"inside"|"center"|"outside"}.
+- effect: {"type":"shadow","shadowType":"outer"|"inner","offset":{"x":0,"y":4},"blur":12,"color":"#00000040"} or {"type":"blur","radius":8}, or an array of them.
+- Not supported: percentages, margins, wrapping rows, padding on text. Build grids from rows of horizontal frames, and offset a single child by wrapping it in a frame with padding.

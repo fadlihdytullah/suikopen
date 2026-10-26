@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { app, BrowserWindow, dialog, ipcMain, net } from 'electron'
 import { readDocument, writeDocument } from './file-io'
 import type { Document } from '../shared/schema/document'
+import { readFont, type FontRequest } from './fonts'
 
 export type OpenResult =
   | { ok: true; document: Document; path: string | null; assetBase: string }
@@ -178,39 +179,7 @@ export function registerAssetHandlers(): void {
     }
   })
 
-  ipcMain.handle('font:read', async (_event, request: { family: string; weight?: number; italic?: boolean }) => {
-    for (const candidate of fontCandidates(request.family, request.weight ?? 400, request.italic ?? false)) {
-      try {
-        const bytes = await readFile(candidate)
-        return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
-      } catch {
-        continue
-      }
-    }
-    return null
-  })
-}
-
-function fontCandidates(family: string, weight: number, italic: boolean): string[] {
-  const bold = weight >= 600
-  const suffix = bold && italic ? ' Bold Italic' : bold ? ' Bold' : italic ? ' Italic' : ''
-
-  if (process.platform === 'darwin') {
-    return [
-      `/System/Library/Fonts/Supplemental/${family}${suffix}.ttf`,
-      `/System/Library/Fonts/Supplemental/${family}.ttf`,
-      `/Library/Fonts/${family}${suffix}.ttf`,
-      '/System/Library/Fonts/Supplemental/Arial.ttf',
-      '/System/Library/Fonts/SFNS.ttf',
-    ]
-  }
-
-  if (process.platform === 'win32') {
-    return [`C:/Windows/Fonts/${family}${suffix}.ttf`, 'C:/Windows/Fonts/arial.ttf', 'C:/Windows/Fonts/segoeui.ttf']
-  }
-
-  return [
-    `/usr/share/fonts/truetype/dejavu/DejaVuSans${bold ? '-Bold' : ''}.ttf`,
-    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-  ]
+  ipcMain.handle('font:read', (_event, request: FontRequest) =>
+    readFont(request, join(app.getPath('userData'), 'fonts'), (url, init) => net.fetch(url, init))
+  )
 }

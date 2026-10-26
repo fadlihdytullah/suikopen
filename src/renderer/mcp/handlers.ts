@@ -1,6 +1,7 @@
 import type { AgentRequest, NodeSummary } from '../../shared/mcp/contract'
 import { hasChildren, NodeSchema, type Node } from '../../shared/schema/node'
-import { itemById, sceneItems, type SceneItem } from '../canvas/scene-index'
+import { VariableSchema, type Variable } from '../../shared/schema/document'
+import { itemById, parentChain, sceneItems, type Rect, type SceneItem } from '../canvas/scene-index'
 import { resolvedDocument } from '../document/current'
 import { activeTheme, setActiveTheme } from '../document/resolved'
 import { detachInstance } from '../store/mutations'
@@ -12,6 +13,9 @@ import { toScreen } from '../canvas/viewport'
 import type { DocumentStore } from '../store/document-store'
 import type { MutationQueue } from '../store/mutation-queue'
 import { removeNodes, setNodeProps, updateNodes } from '../store/mutations'
+import { findProblems, type Problem } from './problems'
+import { exportHtml, variablesCss, type ExportFormat } from './html-export'
+import { resolveDocument } from '../document/resolve'
 import type { SelectionStore } from '../store/selection'
 
 function summarise(item: SceneItem, withChildren = false): NodeSummary {
@@ -60,6 +64,30 @@ function ids(params: Record<string, unknown>): string[] {
   return [requireString(params, 'id')]
 }
 
+export const MAX_BATCH_OPS = 200
+const BATCHABLE = ['create_node', 'update_node', 'move_node', 'set_text', 'delete_nodes']
+
+function findNode(nodes: Node[], id: string): Node | null {
+  for (const node of nodes) {
+    if (node.id === id) {
+      return node
+    }
+    const found = hasChildren(node) ? findNode(node.children, id) : null
+    if (found) {
+      return found
+    }
+  }
+  return null
+}
+
+function withoutProblems(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || !('problems' in value)) {
+    return value
+  }
+  const { problems: _ignored, ...rest } = value as Record<string, unknown>
+  return rest
+}
+
 function insertInto(nodes: Node[], parentId: string | null, child: Node): boolean {
   if (parentId === null) {
     nodes.push(child)
@@ -97,6 +125,12 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
       throw new Error(`No node with id "${id}".`)
     }
     return item
+  }
+
+  function withProblems(id: string) {
+    const item = node(id)
+    const problems = findProblems(items(), item.parentId ?? id)
+    return problems.length ? { ...summarise(item), problems } : summarise(item)
   }
 
   const read: Record<string, (params: Record<string, unknown>) => unknown | Promise<unknown>> = {
@@ -137,6 +171,24 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
       }
       return { png }
     },
+    get_variables: () => {
+      const { variables = {}, themes = {} } = store.getState()
+      return { variables, themes, css: variablesCss(variables) }
+    },
+    export_code: (params) => {
+      const id = requireString(params, 'id')
+      node(id)
+      const format: ExportFormat = params['format'] === 'html-css' ? 'html-css' : 'html-tailwind'
+      const state = store.getState()
+      const tokens = resolveDocument({ ...state, variables: undefined }).document
+      const target = findNode(tokens.children, id)
+      if (!target) {
+        throw new Error(`Could not export "${id}".`)
+      }
+      const rects = new Map<string, Rect>(items().map((item) => [item.node.id, item]))
+      return exportHtml(target, rects, format, state.variables)
+    },
+    get_problems: (params) => findProblems(items(), node(requireString(params, 'id')).node.id),
     get_screen_rect: (params) => {
       const item = node(requireString(params, 'id'))
       const { viewport, origin } = currentViewport()
@@ -171,7 +223,7 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
       }
       validNode({ ...raw.node, ...(props as Record<string, unknown>), id })
       setNodeProps(store, 'Agent update', [id], props as Record<string, unknown>)
-      return summarise(node(id))
+      return withProblems(id)
     },
     move_node: (params) => {
       const id = requireString(params, 'id')
@@ -214,6 +266,39 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
       detachInstance(store, id, item.node)
       return { detached: id }
     },
+    set_variables: (params) => {
+      const input = params['variables']
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        throw new Error('Missing required object parameter "variables".')
+      }
+      const parsed: Record<string, Variable> = {}
+      for (const [name, value] of Object.entries(input)) {
+        if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+          throw new Error(`Invalid variable name "${name}": use letters, digits, "-" and "_".`)
+        }
+        const result = VariableSchema.safeParse(value)
+        if (!result.success) {
+          throw new Error(`Invalid variable "${name}": ${result.error.issues[0]?.message ?? 'does not match the schema'}.`)
+        }
+        parsed[name] = result.data
+      }
+      const axes: Record<string, Set<string>> = {}
+      for (const variable of Object.values(parsed)) {
+        for (const entry of Array.isArray(variable.value) ? variable.value : []) {
+          for (const [axis, option] of Object.entries(entry.theme ?? {})) {
+            ;(axes[axis] ??= new Set()).add(option)
+          }
+        }
+      }
+      store.apply('Agent set variables', (draft) => {
+        draft.variables = params['replace'] === true ? parsed : { ...(draft.variables ?? {}), ...parsed }
+        for (const [axis, options] of Object.entries(axes)) {
+          const themes = (draft.themes ??= {})
+          themes[axis] = [...new Set([...(themes[axis] ?? []), ...options])]
+        }
+      })
+      return { variables: Object.keys(store.getState().variables ?? {}), themes: store.getState().themes ?? {} }
+    },
     create_node: (params) => {
       const parentId = typeof params['parentId'] === 'string' ? params['parentId'] : null
       const spec = params['node']
@@ -238,8 +323,63 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
         throw new Error(`Could not insert into "${parentId}": it has no children.`)
       }
 
-      return summarise(node(child.id))
+      return withProblems(child.id)
     },
+  }
+
+  function touchedId(method: string, params: Record<string, unknown>): string | undefined {
+    return method === 'create_node'
+      ? ((params['node'] as { id?: unknown } | undefined)?.id as string | undefined)
+      : typeof params['id'] === 'string'
+        ? params['id']
+        : undefined
+  }
+
+  function runBatch(params: Record<string, unknown>) {
+    const ops = params['ops']
+    if (!Array.isArray(ops) || ops.length === 0) {
+      throw new Error('Missing required array parameter "ops".')
+    }
+    if (ops.length > MAX_BATCH_OPS) {
+      throw new Error(`A batch holds at most ${MAX_BATCH_OPS} operations; split it.`)
+    }
+
+    const start = store.getState()
+    const results: unknown[] = []
+    store.beginGesture('Agent batch')
+    try {
+      ops.forEach((op: unknown, index) => {
+        const { tool: method, ...rest } = (typeof op === 'object' && op !== null ? op : {}) as Record<string, unknown>
+        const writer = typeof method === 'string' && BATCHABLE.includes(method) ? write[method] : undefined
+        if (!writer) {
+          throw new Error(`Operation ${index + 1}: "tool" must be one of ${BATCHABLE.join(', ')}.`)
+        }
+        try {
+          results.push(withoutProblems(writer(rest)))
+        } catch (error) {
+          throw new Error(`Operation ${index + 1} (${method}) failed: ${(error as Error).message} Nothing in this batch was applied.`)
+        }
+      })
+    } catch (error) {
+      store.endGesture()
+      if (store.getState() !== start) {
+        store.undo()
+      }
+      throw error
+    }
+    store.endGesture()
+
+    const all = items()
+    const roots = new Set<string>()
+    ops.forEach((op: Record<string, unknown>) => {
+      const id = touchedId(String(op['tool']), op)
+      if (id && itemById(resolvedDocument(store), id)) {
+        roots.add(parentChain(all, id).at(-1) ?? id)
+        touched(String(op['tool']), op)
+      }
+    })
+    const problems: Problem[] = [...roots].flatMap((root) => findProblems(all, root))
+    return problems.length ? { results, problems } : { results }
   }
 
   function subtreeIds(id: string): string[] {
@@ -259,20 +399,14 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
     return ordered
   }
 
-  function touched(method: string, params: Record<string, unknown>, result: unknown): void {
-    const id =
-      method === 'create_node'
-        ? ((params['node'] as { id?: unknown } | undefined)?.id as string | undefined)
-        : typeof params['id'] === 'string'
-          ? params['id']
-          : undefined
+  function touched(method: string, params: Record<string, unknown>): void {
+    const id = touchedId(method, params)
 
     if (!id || !itemById(resolvedDocument(store), id)) {
       return
     }
 
     markAgentTouch(id, method === 'create_node' ? subtreeIds(id) : [])
-    void result
   }
 
   return async function handle(request: AgentRequest): Promise<unknown> {
@@ -281,13 +415,17 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
       return reader(request.params)
     }
 
+    if (request.method === 'batch') {
+      return queue.run(() => runBatch(request.params))
+    }
+
     const writer = write[request.method]
     if (!writer) {
       throw new Error(`Unknown method "${request.method}".`)
     }
 
     const result = await queue.run(() => writer(request.params))
-    touched(request.method, request.params, result)
+    touched(request.method, request.params)
     return result
   }
 }
