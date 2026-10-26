@@ -1,0 +1,411 @@
+{
+  "version": 1,
+  "children": [
+    {
+      "id": "f1",
+      "type": "frame",
+      "name": "Screen",
+      "x": 0,
+      "y": 0,
+      "width": 390,
+      "height": 844,
+      "fill": "$surface",
+      "children": [
+        {
+          "id": "r1",
+          "type": "rectangle",
+          "name": "Card",
+          "x": 24,
+          "y": 64,
+          "width": 342,
+          "height": 120,
+          "fill": "$accent",
+          "cornerRadius": "$radius"
+        },
+        {
+          "id": "e1",
+          "type": "ellipse",
+          "name": "Avatar",
+          "x": 48,
+          "y": 88,
+          "width": 72,
+          "height": 72,
+          "fill": "#ffd166"
+        },
+        {
+          "id": "t1",
+          "type": "text",
+          "name": "Title",
+          "x": 24,
+          "y": 208,
+          "width": 342,
+          "height": "fit_content(40)",
+          "fill": "$ink",
+          "content": "Hello, suikopen \u2014 real shaped text that wraps across lines.",
+          "fontSize": 22,
+          "fontWeight": 600
+        }
+      ]
+    },
+    {
+      "id": "f2",
+      "type": "frame",
+      "name": "Stack",
+      "x": 440,
+      "y": 0,
+      "width": "fit_content(240)",
+      "height": "fit_content(400)",
+      "fill": "#14161a",
+      "cornerRadius": 16,
+      "layout": "vertical",
+      "gap": 12,
+      "padding": [
+        20,
+        16
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "id": "s1",
+          "type": "rectangle",
+          "x": 0,
+          "y": 0,
+          "width": "fill_container(200)",
+          "height": 48,
+          "fill": "#2f6fed",
+          "cornerRadius": 8
+        },
+        {
+          "id": "s2",
+          "type": "rectangle",
+          "x": 0,
+          "y": 0,
+          "width": 200,
+          "height": 48,
+          "fill": "#3dd68c",
+          "cornerRadius": 8
+        },
+        {
+          "id": "s3",
+          "type": "ellipse",
+          "x": 0,
+          "y": 0,
+          "width": 64,
+          "height": 64,
+          "fill": "#ffd166"
+        },
+        {
+          "id": "f3",
+          "type": "frame",
+          "name": "Row",
+          "x": 0,
+          "y": 0,
+          "width": "fill_container(200)",
+          "height": "fit_content(60)",
+          "fill": "#232733",
+          "cornerRadius": 8,
+          "layout": "horizontal",
+          "gap": 8,
+          "padding": 8,
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "id": "c1",
+              "type": "rectangle",
+              "x": 0,
+              "y": 0,
+              "width": 40,
+              "height": 40,
+              "fill": "#e4606d",
+              "cornerRadius": 6
+            },
+            {
+              "id": "c2",
+              "type": "rectangle",
+              "x": 0,
+              "y": 0,
+              "width": 40,
+              "height": 40,
+              "fill": "#f0a04b",
+              "cornerRadius": 6
+            },
+            {
+              "id": "c3",
+              "type": "rectangle",
+              "x": 0,
+              "y": 0,
+              "width": 40,
+              "height": 40,
+              "fill": "#9b8cff",
+              "cornerRadius": 6
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "f4",
+      "type": "frame",
+      "name": "Styles",
+      "x": 760,
+      "y": 0,
+      "width": "fit_content(300)",
+      "height": "fit_content(300)",
+      "fill": "#14161a",
+      "cornerRadius": 16,
+      "layout": "vertical",
+      "gap": 14,
+      "padding": 18,
+      "children": [
+        {
+          "id": "g1",
+          "type": "rectangle",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 80,
+          "cornerRadius": [
+            24,
+            6,
+            24,
+            6
+          ],
+          "fill": {
+            "type": "gradient",
+            "gradientType": "linear",
+            "rotation": 45,
+            "colors": [
+              {
+                "color": "#2f6fed",
+                "position": 0
+              },
+              {
+                "color": "#9b8cff",
+                "position": 1
+              }
+            ]
+          },
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "offset": {
+              "x": 0,
+              "y": 8
+            },
+            "blur": 18,
+            "color": "#00000080"
+          }
+        },
+        {
+          "id": "g2",
+          "type": "ellipse",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 80,
+          "fill": {
+            "type": "gradient",
+            "gradientType": "radial",
+            "colors": [
+              {
+                "color": "#3dd68c",
+                "position": 0
+              },
+              {
+                "color": "#14161a",
+                "position": 1
+              }
+            ]
+          },
+          "stroke": {
+            "color": "#3dd68c",
+            "width": 2,
+            "align": "inside"
+          }
+        },
+        {
+          "id": "g3",
+          "type": "rectangle",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 60,
+          "cornerRadius": 10,
+          "fill": "#232733",
+          "stroke": {
+            "color": "#f0a04b",
+            "width": 3,
+            "align": "outside"
+          },
+          "effect": [
+            {
+              "type": "shadow",
+              "shadowType": "inner",
+              "blur": 10,
+              "color": "#00000099"
+            }
+          ]
+        },
+        {
+          "id": "t2",
+          "type": "text",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": "fit_content(40)",
+          "fill": "#e6e7ea",
+          "content": "Centred caption with letter spacing.",
+          "fontSize": 16,
+          "textAlign": "center",
+          "letterSpacing": 0.5
+        },
+        {
+          "id": "g4",
+          "type": "rectangle",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 50,
+          "cornerRadius": 8,
+          "fill": "#9b8cff",
+          "effect": {
+            "type": "blur",
+            "radius": 6
+          }
+        },
+        {
+          "id": "g5",
+          "type": "rectangle",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 70,
+          "cornerRadius": 10,
+          "fill": {
+            "type": "image",
+            "url": "./swatch.png",
+            "mode": "cover"
+          }
+        }
+      ]
+    },
+    {
+      "id": "master",
+      "type": "frame",
+      "name": "Button",
+      "x": 1120,
+      "y": 0,
+      "width": "fit_content(160)",
+      "height": "fit_content(48)",
+      "fill": "$accent",
+      "cornerRadius": "$radius",
+      "layout": "horizontal",
+      "gap": 8,
+      "padding": [
+        12,
+        20
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "id": "dot",
+          "type": "ellipse",
+          "x": 0,
+          "y": 0,
+          "width": 12,
+          "height": 12,
+          "fill": "#ffffff"
+        },
+        {
+          "id": "label",
+          "type": "text",
+          "x": 0,
+          "y": 0,
+          "width": "fit_content(80)",
+          "height": "fit_content(20)",
+          "fill": "#ffffff",
+          "content": "Button",
+          "fontSize": 16,
+          "fontWeight": 600
+        }
+      ]
+    },
+    {
+      "id": "inst1",
+      "type": "ref",
+      "x": 1120,
+      "y": 90,
+      "width": 0,
+      "height": 0,
+      "masterId": "master"
+    },
+    {
+      "id": "inst2",
+      "type": "ref",
+      "x": 1120,
+      "y": 170,
+      "width": 0,
+      "height": 0,
+      "masterId": "master",
+      "overrides": {
+        "master/label": {
+          "content": "Overridden"
+        },
+        "master": {
+          "fill": "#3dd68c"
+        }
+      }
+    }
+  ],
+  "themes": {
+    "appearance": [
+      "light",
+      "dark"
+    ]
+  },
+  "variables": {
+    "surface": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#ffffff",
+          "theme": {
+            "appearance": "light"
+          }
+        },
+        {
+          "value": "#14161a",
+          "theme": {
+            "appearance": "dark"
+          }
+        }
+      ]
+    },
+    "ink": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#101114",
+          "theme": {
+            "appearance": "light"
+          }
+        },
+        {
+          "value": "#e6e7ea",
+          "theme": {
+            "appearance": "dark"
+          }
+        }
+      ]
+    },
+    "accent": {
+      "type": "color",
+      "value": "#2f6fed"
+    },
+    "radius": {
+      "type": "number",
+      "value": 12
+    }
+  }
+}

@@ -1,0 +1,6 @@
+node_modules
+out
+src/renderer/public
+.DS_Store
+.vitest
+*.suikopen-backup
