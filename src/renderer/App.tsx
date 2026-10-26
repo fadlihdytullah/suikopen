@@ -12,6 +12,7 @@ import { LeftPanel, RightPanel, usePanelCommands } from './ui/Panels'
 import { SettingsDialog } from './ui/SettingsDialog'
 import { createEditCommands } from './tools/commands'
 import { TextEditor } from './tools/TextEditor'
+import { setDocumentPath } from './document/current-path'
 import { Toolbar } from './tools/Toolbar'
 
 const message: React.CSSProperties = {
@@ -45,6 +46,7 @@ function Editor({
   const session = useFileSession(store, selection, path, assetBase, onReplace)
   const pathRef = useRef(session.path)
   pathRef.current = session.path
+  useEffect(() => setDocumentPath(session.path), [session.path])
 
   useEffect(() => createEditCommands(store, selection), [store, selection])
 

@@ -3,7 +3,7 @@ import type { Document } from '../shared/schema/document'
 import type { Asset, DiscardChoice, OpenResult, SaveResult } from '../main/ipc'
 import type { MenuCommand } from '../main/menu'
 import type { AgentRequest, AgentResponse } from '../shared/mcp/contract'
-import type { AgentAttachmentResult, AgentEvent, AgentModelOption, AgentProviderId, AgentProviderStatus, AgentRunRequest, AgentSkill, AgentTestResult } from '../shared/agent'
+import type { ChatRecord, ChatSummary, AgentAttachmentResult, AgentEvent, AgentModelOption, AgentProviderId, AgentProviderStatus, AgentRunRequest, AgentSkill, AgentTestResult } from '../shared/agent'
 
 contextBridge.exposeInMainWorld('suikopen', {
   platform: process.platform,
@@ -37,6 +37,10 @@ contextBridge.exposeInMainWorld('suikopen', {
   agentSignIn: (provider: AgentProviderId, reconnect?: boolean): Promise<void> => ipcRenderer.invoke('agent:sign-in', provider, reconnect),
   agentTest: (provider: AgentProviderId): Promise<AgentTestResult> => ipcRenderer.invoke('agent:test', provider),
   pathForFile: (file: File): string => webUtils.getPathForFile(file),
+  listChats: (documentPath?: string | null): Promise<ChatSummary[]> => ipcRenderer.invoke('chats:list', documentPath),
+  getChat: (id: string): Promise<ChatRecord | null> => ipcRenderer.invoke('chats:get', id),
+  saveChat: (record: ChatRecord): Promise<void> => ipcRenderer.invoke('chats:save', record),
+  deleteChat: (id: string): Promise<void> => ipcRenderer.invoke('chats:delete', id),
   mcpStatus: (client: string): Promise<{ installed: boolean; path: string }> => ipcRenderer.invoke('mcp:status', client),
   mcpInstall: (client: string): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke('mcp:install', client),
   agentAttach: (paths: string[]): Promise<AgentAttachmentResult[]> => ipcRenderer.invoke('agent:attach', paths),

@@ -3,7 +3,7 @@ import type { Document } from '../../shared/schema/document'
 import type { Asset, DiscardChoice, OpenResult, SaveResult } from '../../main/ipc'
 import type { MenuCommand } from '../../main/menu'
 import type { AgentRequest } from '../../shared/mcp/contract'
-import type { AgentAttachmentResult, AgentEvent, AgentModelOption, AgentProviderId, AgentProviderStatus, AgentRunRequest, AgentSkill, AgentTestResult } from '../../shared/agent'
+import type { ChatRecord, ChatSummary, AgentAttachmentResult, AgentEvent, AgentModelOption, AgentProviderId, AgentProviderStatus, AgentRunRequest, AgentSkill, AgentTestResult } from '../../shared/agent'
 
 declare global {
   interface Window {
@@ -28,6 +28,10 @@ declare global {
       agentSignIn: (provider: AgentProviderId, reconnect?: boolean) => Promise<void>
       agentTest: (provider: AgentProviderId) => Promise<AgentTestResult>
       pathForFile: (file: File) => string
+      listChats: (documentPath?: string | null) => Promise<ChatSummary[]>
+      getChat: (id: string) => Promise<ChatRecord | null>
+      saveChat: (record: ChatRecord) => Promise<void>
+      deleteChat: (id: string) => Promise<void>
       mcpStatus: (client: string) => Promise<{ installed: boolean; path: string }>
       mcpInstall: (client: string) => Promise<{ ok: boolean; message: string }>
       agentAttach: (paths: string[]) => Promise<AgentAttachmentResult[]>

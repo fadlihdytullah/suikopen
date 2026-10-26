@@ -99,3 +99,26 @@ export const ATTACHMENT_SUPPORT: Record<AgentProviderId, AgentAttachmentKind[]> 
 }
 
 export const ATTACHMENT_HINT = 'Images, PDFs and text files up to 10 MB'
+
+export type ChatFile = { name: string; kind: AgentAttachmentKind; thumbnail?: string; lines?: number }
+
+export type ChatEntry =
+  | { kind: 'user'; text: string; skills: string[]; files: ChatFile[] }
+  | { kind: 'assistant'; text: string }
+  | { kind: 'tools'; names: string[] }
+  | { kind: 'error'; text: string; signIn?: AgentProviderId }
+
+export type ChatSummary = {
+  id: string
+  title: string
+  documentPath: string | null
+  provider: AgentProviderId
+  updatedAt: number
+}
+
+export type ChatRecord = ChatSummary & {
+  model: string
+  sessionId: string | null
+  createdAt: number
+  entries: ChatEntry[]
+}

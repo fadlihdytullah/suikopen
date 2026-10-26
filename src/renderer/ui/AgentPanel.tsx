@@ -7,7 +7,7 @@ import {
   ATTACHMENT_HINT,
   FALLBACK_MODELS,
   PROVIDERS,
-  type AgentAttachmentKind,
+  type ChatEntry,
   type AgentEffort,
   type AgentModelOption,
   type AgentProviderId,
@@ -21,12 +21,15 @@ import { usePopover } from './Popover'
 import { SkillPicker } from './SkillPicker'
 import { attachmentError, AttachmentChips, DropOverlay, isLongPaste, SentAttachments, sendableAttachments, useAttachments, useFileDrop } from './Attachments'
 import { openSettings, refreshStatuses, setProvider, useSettings } from './settings-state'
+import { ChatPicker } from './ChatPicker'
+import { useDocumentPath } from '../document/current-path'
 
-type Entry =
-  | { kind: 'user'; text: string; skills: string[]; files: { name: string; kind: AgentAttachmentKind; thumbnail?: string; lines?: number }[] }
-  | { kind: 'assistant'; text: string }
-  | { kind: 'tools'; names: string[] }
-  | { kind: 'error'; text: string; signIn?: AgentProviderId }
+type Entry = ChatEntry
+
+function chatTitle(entries: Entry[]): string {
+  const first = entries.find((entry) => entry.kind === 'user')
+  return (first?.kind === 'user' ? first.text || first.files[0]?.name : undefined)?.slice(0, 80) || 'New chat'
+}
 
 const MODEL_KEY = 'suikopen.agent.model'
 const EFFORT_KEY = 'suikopen.agent.effort'
@@ -136,6 +139,64 @@ export function AgentPanel(): React.ReactElement {
   })
   const fileProblem = files.items.some((item) => attachmentError(item, provider))
   const lastPaste = useRef<{ id: string; draft: string } | null>(null)
+  const documentPath = useDocumentPath()
+  const chatRef = useRef<{ id: string; createdAt: number } | null>(null)
+  const [chatId, setChatId] = useState<string | null>(null)
+  const busyRef = useRef(busy)
+
+  useEffect(() => {
+    if (busyRef.current === busy) return
+    busyRef.current = busy
+    if (entries.length === 0) return
+    chatRef.current ??= { id: crypto.randomUUID(), createdAt: Date.now() }
+    setChatId(chatRef.current.id)
+    void window.suikopen.saveChat({
+      ...chatRef.current,
+      title: chatTitle(entries),
+      documentPath,
+      provider,
+      model,
+      sessionId: sessionRef.current,
+      updatedAt: Date.now(),
+      entries,
+    })
+  }, [busy])
+
+  useEffect(() => {
+    if (busy || entries.length) return
+    let current = true
+    void window.suikopen.listChats(documentPath).then((chats) => {
+      if (current && chats[0]) void openChat(chats[0].id)
+    })
+    return () => {
+      current = false
+    }
+  }, [documentPath])
+
+  async function openChat(id: string): Promise<void> {
+    if (busy || id === chatRef.current?.id) return
+    const record = await window.suikopen.getChat(id)
+    if (!record) return
+    if (record.provider !== providerRef.current) {
+      providerRef.current = record.provider
+      setProvider(record.provider)
+    }
+    setModel(record.model)
+    sessionRef.current = record.sessionId
+    chatRef.current = { id: record.id, createdAt: record.createdAt }
+    setChatId(record.id)
+    setEntries(record.entries)
+    setCost(null)
+    setAttached([])
+    files.clear()
+  }
+
+  async function deleteCurrent(): Promise<void> {
+    const id = chatRef.current?.id
+    if (!id || busy) return
+    await window.suikopen.deleteChat(id)
+    reset()
+  }
 
   function insertText(text: string): void {
     const input = inputRef.current
@@ -284,14 +345,14 @@ export function AgentPanel(): React.ReactElement {
 
   function reset(): void {
     sessionRef.current = null
+    chatRef.current = null
+    setChatId(null)
     setEntries([])
     setCost(null)
     setAttached([])
     files.clear()
     inputRef.current?.focus()
   }
-
-  const firstPrompt = entries.find((entry) => entry.kind === 'user')
 
   return (
     <div className="agent" {...drop.handlers}>
@@ -300,7 +361,14 @@ export function AgentPanel(): React.ReactElement {
         {drop.over ? 'Drop to attach files.' : files.announcement}
       </p>
       <header className="agent-head">
-        <h2 className="agent-title">{firstPrompt?.kind === 'user' ? firstPrompt.text || firstPrompt.files[0]?.name : 'New chat'}</h2>
+        <ChatPicker
+          title={chatTitle(entries)}
+          currentId={chatId}
+          documentPath={documentPath}
+          disabled={busy}
+          onOpen={(id) => void openChat(id)}
+          onDelete={() => void deleteCurrent()}
+        />
         <button className="icon-button" aria-label="Agent settings" title="Agent settings  ⌘," onClick={() => openSettings('agents')}>
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M2 4h6M11 4h1M2 10h1M6 10h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

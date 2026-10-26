@@ -1,7 +1,8 @@
 import { dialog, ipcMain } from 'electron'
 import { describeAttachment, savePasted } from './attachments'
+import { deleteChat, getChat, listChats, saveChat } from './chats'
 import { installMcp, mcpStatus, type McpClient } from '../mcp/install'
-import type { AgentProviderId, AgentRunRequest } from '../../shared/agent'
+import type { AgentProviderId, AgentRunRequest, ChatRecord } from '../../shared/agent'
 import { listModels, openSignIn, providerStatus, runAgent, stopAgent, testProvider } from './runner'
 import { listSkills } from './skills'
 
@@ -35,6 +36,14 @@ export function registerAgentHandlers(): void {
     })
     return result.canceled ? [] : Promise.all(result.filePaths.map(describeAttachment))
   })
+
+  ipcMain.handle('chats:list', (_event, documentPath?: string | null) => listChats(documentPath))
+
+  ipcMain.handle('chats:get', (_event, id: string) => getChat(id))
+
+  ipcMain.handle('chats:save', (_event, record: ChatRecord) => saveChat(record))
+
+  ipcMain.handle('chats:delete', (_event, id: string) => deleteChat(id))
 
   ipcMain.handle('mcp:status', (_event, client: McpClient) => mcpStatus(client))
 
