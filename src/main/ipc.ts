@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, net } from 'electron'
 import { readDocument, writeDocument } from './file-io'
 import type { Document } from '../shared/schema/document'
 import { readFont, type FontRequest } from './fonts'
+import { allowedImageUrl } from '../shared/image-hosts'
 
 export type OpenResult =
   | { ok: true; document: Document; path: string | null; assetBase: string }
@@ -27,8 +28,41 @@ async function pickSavePath(suggested: string | null): Promise<string | null> {
   return result.canceled || !result.filePath ? null : result.filePath
 }
 
+const trustedPaths = new Set<string>()
+let pendingPath: string | null = null
+
+async function openPath(path: string): Promise<OpenResult> {
+  try {
+    const document = await readDocument(path)
+    const imported = path.toLowerCase().endsWith('.pen')
+    if (!imported) {
+      trustedPaths.add(path)
+      app.addRecentDocument(path)
+    }
+    return { ok: true, document, path: imported ? null : path, assetBase: path }
+  } catch (error) {
+    return { ok: false, error: (error as Error).message }
+  }
+}
+
+export async function openFileInWindow(path: string): Promise<boolean> {
+  const window = BrowserWindow.getAllWindows()[0]
+  if (!window) {
+    pendingPath = path
+    return false
+  }
+  window.webContents.send('document:opened', await openPath(path))
+  window.focus()
+  return true
+}
+
 export function registerDocumentHandlers(): void {
   ipcMain.handle('document:open-initial', async (): Promise<OpenResult> => {
+    if (pendingPath) {
+      const path = pendingPath
+      pendingPath = null
+      return openPath(path)
+    }
     try {
       const source = initialDocumentPath()
       return { ok: true, document: await readDocument(source), path: null, assetBase: source }
@@ -48,22 +82,14 @@ export function registerDocumentHandlers(): void {
       return { cancelled: true }
     }
 
-    try {
-      const document = await readDocument(path)
-      const imported = path.toLowerCase().endsWith('.pen')
-      if (!imported) {
-        app.addRecentDocument(path)
-      }
-      return { ok: true, document, path: imported ? null : path, assetBase: path }
-    } catch (error) {
-      return { ok: false, error: (error as Error).message }
-    }
+    return openPath(path)
   })
 
   ipcMain.handle(
     'document:save',
     async (_event, request: { path: string | null; document: Document; saveAs?: boolean }): Promise<SaveResult> => {
-      const path = request.saveAs || !request.path ? await pickSavePath(request.path) : request.path
+      const trusted = request.path !== null && trustedPaths.has(request.path)
+      const path = request.saveAs || !trusted ? await pickSavePath(request.path) : request.path
 
       if (!path) {
         return { cancelled: true }
@@ -71,6 +97,7 @@ export function registerDocumentHandlers(): void {
 
       try {
         await writeDocument(path, request.document)
+        trustedPaths.add(path)
         app.addRecentDocument(path)
         return { ok: true, path }
       } catch (error) {
@@ -124,9 +151,9 @@ function fetchRemoteAsset(url: string): Promise<Asset | null> {
 
   const pending = (async (): Promise<Asset | null> => {
     try {
-      const response = await net.fetch(url, { signal: AbortSignal.timeout(REMOTE_ASSET_TIMEOUT_MS) })
+      const response = await net.fetch(url, { redirect: 'error', signal: AbortSignal.timeout(REMOTE_ASSET_TIMEOUT_MS) })
       const type = response.headers.get('content-type') ?? ''
-      if (!response.ok || !type.startsWith('image/')) {
+      if (!response.ok || !type.startsWith('image/') || Number(response.headers.get('content-length') ?? 0) > REMOTE_ASSET_LIMIT) {
         return null
       }
       const bytes = await response.arrayBuffer()
@@ -155,8 +182,8 @@ export function insideRoot(root: string, target: string): boolean {
 
 export function registerAssetHandlers(): void {
   ipcMain.handle('asset:read', async (_event, request: { base: string | null; url: string }): Promise<Asset | null> => {
-    if (/^https:\/\//i.test(request.url)) {
-      return fetchRemoteAsset(request.url)
+    if (/^https?:\/\//i.test(request.url)) {
+      return allowedImageUrl(request.url) ? fetchRemoteAsset(request.url) : null
     }
 
     if (!IMAGE_EXTENSION.test(request.url)) {

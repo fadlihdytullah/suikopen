@@ -20,7 +20,7 @@ export type History = {
 export function createHistory(limit = HISTORY_LIMIT): History {
   const past: HistoryEntry[] = []
   const future: HistoryEntry[] = []
-  let pending: HistoryEntry | null = null
+  let pending: (HistoryEntry & { inverseChunks: Patch[][] }) | null = null
 
   function commit(entry: HistoryEntry): void {
     past.push(entry)
@@ -35,13 +35,14 @@ export function createHistory(limit = HISTORY_LIMIT): History {
       return null
     }
 
-    const entry = pending
+    const { label, forward, inverseChunks } = pending
     pending = null
 
-    if (entry.forward.length === 0) {
+    if (forward.length === 0) {
       return null
     }
 
+    const entry = { label, forward, inverse: inverseChunks.reverse().flat() }
     commit(entry)
     return entry
   }
@@ -58,12 +59,12 @@ export function createHistory(limit = HISTORY_LIMIT): History {
         return false
       }
       pending.forward.push(...forward)
-      pending.inverse.unshift(...inverse)
+      pending.inverseChunks.push(inverse)
       return true
     },
     open: (label) => {
       close()
-      pending = { label, forward: [], inverse: [] }
+      pending = { label, forward: [], inverse: [], inverseChunks: [] }
     },
     close,
     undo: () => {

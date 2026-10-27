@@ -15,7 +15,14 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(root, 'src/renderer'),
-    plugins: [react()],
+    plugins: [
+      react(),
+      {
+        name: 'dev-csp',
+        apply: 'serve',
+        transformIndexHtml: (html: string) => html.replace("script-src 'self' 'wasm-unsafe-eval'", "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' 'unsafe-eval'"),
+      },
+    ],
     build: { rollupOptions: { input: resolve(root, 'src/renderer/index.html') } },
   },
 })

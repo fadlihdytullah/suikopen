@@ -30,7 +30,9 @@ export function paintOuterShadows(
     paint.setColor(color4f(canvasKit, effect.color ?? SHADOW_DEFAULT))
     paint.setAntiAlias(true)
     if (effect.blur) {
-      paint.setMaskFilter(canvasKit.MaskFilter.MakeBlur(canvasKit.BlurStyle.Normal, effect.blur / 2, true))
+      const mask = canvasKit.MaskFilter.MakeBlur(canvasKit.BlurStyle.Normal, effect.blur / 2, true)
+      paint.setMaskFilter(mask)
+      mask.delete()
     }
 
     canvas.save()
@@ -69,7 +71,9 @@ export function paintInnerShadows(
     paint.setStyle(canvasKit.PaintStyle.Stroke)
     paint.setStrokeWidth(Math.max(1, (effect.blur ?? 0) * 2))
     if (effect.blur) {
-      paint.setMaskFilter(canvasKit.MaskFilter.MakeBlur(canvasKit.BlurStyle.Normal, effect.blur / 2, true))
+      const mask = canvasKit.MaskFilter.MakeBlur(canvasKit.BlurStyle.Normal, effect.blur / 2, true)
+      paint.setMaskFilter(mask)
+      mask.delete()
     }
 
     canvas.save()

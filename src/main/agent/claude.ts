@@ -2,9 +2,10 @@ import { query, type EffortLevel, type SDKUserMessage } from '@anthropic-ai/clau
 import { DEFAULT_MODEL, type AgentModelOption, type AgentRunRequest } from '../../shared/agent'
 import { promptWithText, readBase64 } from './attachments'
 import { MCP_SERVER_NAME, TOOL_NAMES } from '../mcp/server'
+import { mcpToken } from '../mcp/token'
 import { childEnvironment, findExecutable, MCP_URL, runCommand, systemPrompt, workspace, type ProviderRun } from './process'
 
-const WEB_TOOLS = ['WebFetch', 'WebSearch']
+const WEB_TOOLS = ['WebSearch']
 
 const PLANS: Record<string, string> = { pro: 'Claude Pro', max: 'Claude Max', team: 'Claude Team', enterprise: 'Claude Enterprise' }
 
@@ -85,7 +86,7 @@ export const runClaude: ProviderRun = async (request, signal, emit) => {
       tools: WEB_TOOLS,
       permissionMode: 'dontAsk',
       allowedTools: [...WEB_TOOLS, ...TOOL_NAMES.map((name) => `mcp__${MCP_SERVER_NAME}__${name}`)],
-      mcpServers: { [MCP_SERVER_NAME]: { type: 'http', url: MCP_URL } },
+      mcpServers: { [MCP_SERVER_NAME]: { type: 'http', url: MCP_URL, headers: { Authorization: `Bearer ${await mcpToken()}` } } },
       systemPrompt: await systemPrompt(request.skills),
       includePartialMessages: true,
       ...(executable ? { pathToClaudeCodeExecutable: executable } : {}),

@@ -101,7 +101,7 @@ export function createApplicationMenu(): void {
           label: 'Install MCP server in Claude Code…',
           click: async () => {
             const { dialog } = await import('electron')
-            const { installIntoClaudeCode, claudeConfigPath } = await import('./mcp/install')
+            const { installMcp, claudeConfigPath } = await import('./mcp/install')
             const choice = await dialog.showMessageBox({
               type: 'question',
               buttons: ['Install', 'Cancel'],
@@ -114,7 +114,7 @@ export function createApplicationMenu(): void {
               return
             }
             try {
-              const result = await installIntoClaudeCode()
+              const result = await installMcp('claude')
               await dialog.showMessageBox({ message: result.changed ? 'Installed.' : 'Already installed.', detail: result.path })
             } catch (error) {
               await dialog.showErrorBox('Could not install', (error as Error).message)

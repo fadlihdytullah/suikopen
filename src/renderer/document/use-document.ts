@@ -15,6 +15,7 @@ declare global {
       setWindowState: (state: { path: string | null; edited: boolean }) => Promise<void>
       confirmDiscard: () => Promise<DiscardChoice>
       onMenuCommand: (callback: (command: MenuCommand) => void) => () => void
+      onDocumentOpened: (callback: (result: OpenResult) => void) => () => void
       onCloseRequest: (callback: () => void) => () => void
       allowClose: () => void
       readAsset: (request: { base: string | null; url: string }) => Promise<Asset | null>

@@ -42,7 +42,21 @@ export function useFileSession(
       return true
     }
 
+    async function confirmReplace(): Promise<boolean> {
+      if (store.getState() === savedRef.current) {
+        return true
+      }
+      const choice = await window.suikopen.confirmDiscard()
+      if (choice === 'cancel') {
+        return false
+      }
+      return choice === 'discard' || (await save())
+    }
+
     async function open(): Promise<void> {
+      if (!(await confirmReplace())) {
+        return
+      }
       const result = await window.suikopen.openDocumentDialog()
       if ('cancelled' in result || !result.ok) {
         return
@@ -77,7 +91,11 @@ export function useFileSession(
 
       switch (command) {
         case 'new':
-          onReplace({ document: { version: 1, children: [] }, path: null, assetBase: null })
+          void confirmReplace().then((ok) => {
+            if (ok) {
+              onReplace({ document: { version: 1, children: [] }, path: null, assetBase: null })
+            }
+          })
           break
         case 'open':
           void open()
@@ -104,21 +122,22 @@ export function useFileSession(
       }
     })
 
+    const offOpened = window.suikopen.onDocumentOpened((result) => {
+      if (!result.ok) {
+        return
+      }
+      void confirmReplace().then((ok) => {
+        if (ok) {
+          onReplace({ document: result.document, path: result.path, assetBase: result.assetBase })
+        }
+      })
+    })
+
     const offClose = window.suikopen.onCloseRequest(() => {
       void (async () => {
-        if (store.getState() === savedRef.current) {
+        if (await confirmReplace()) {
           window.suikopen.allowClose()
-          return
         }
-
-        const choice = await window.suikopen.confirmDiscard()
-        if (choice === 'cancel') {
-          return
-        }
-        if (choice === 'save' && !(await save())) {
-          return
-        }
-        window.suikopen.allowClose()
       })()
     })
 
@@ -126,6 +145,7 @@ export function useFileSession(
       clearTimeout(timer)
       unsubscribe()
       offMenu()
+      offOpened()
       offClose()
     }
   }, [store, selection, onReplace])

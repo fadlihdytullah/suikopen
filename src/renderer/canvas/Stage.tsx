@@ -5,7 +5,7 @@ import { onThemeChange } from '../document/resolved'
 import { resolvedDocument } from '../document/current'
 import { loadCanvasKit } from './canvaskit'
 import { documentBounds, paintScene } from './paint'
-import { invalidateSceneCaches, sceneItems, unionBounds } from './scene-index'
+import { invalidateSceneCaches, itemById, sceneItems, unionBounds } from './scene-index'
 import { onFitRequest, onZoomRequest, publishViewport, type ZoomRequest } from './viewport-ref'
 import { agentGlow, isAnimating, presence, subscribePresence } from '../agent/presence'
 import { onImageLoaded } from './image-cache'
@@ -134,7 +134,7 @@ export function Stage(): React.ReactElement {
             marquee: overlay.marquee,
             guides: overlay.guides,
             agentFocus: glow ? (() => {
-              const item = sceneItems(document).find((entry) => entry.node.id === glow.id)
+              const item = itemById(document, glow.id)
               return item ? { item, alpha: glow.alpha } : null
             })() : null,
           },
@@ -146,7 +146,7 @@ export function Stage(): React.ReactElement {
         const agent = presence()
         if (agent.focusId && agent.focusAt !== followedAt) {
           followedAt = agent.focusAt
-          const item = sceneItems(resolvedDocument(store)).find((entry) => entry.node.id === agent.focusId)
+          const item = itemById(resolvedDocument(store), agent.focusId)
           if (item) {
             moveCamera(followTarget(item))
           }

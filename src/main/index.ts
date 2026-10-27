@@ -1,9 +1,14 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
-import { registerAssetHandlers, registerDocumentHandlers } from './ipc'
+import { openFileInWindow, registerAssetHandlers, registerDocumentHandlers } from './ipc'
 import { createApplicationMenu } from './menu'
-import { startMcpServer } from './mcp/server'
+import { MCP_PORT, startMcpServer } from './mcp/server'
+import { mcpToken } from './mcp/token'
 import { registerAgentHandlers } from './agent/ipc'
+
+const userData = app.getPath('userData')
+app.setName('SuikoPen')
+app.setPath('userData', userData)
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -15,11 +20,13 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   })
 
   window.once('ready-to-show', () => window.show())
+
+  window.webContents.on('will-navigate', (event) => event.preventDefault())
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) {
@@ -29,10 +36,15 @@ function createWindow(): void {
   })
 
   let allowClose = false
-  ipcMain.on('app:allow-close', () => {
+  const onAllowClose = (event: Electron.IpcMainEvent): void => {
+    if (event.sender !== window.webContents) {
+      return
+    }
     allowClose = true
     window.close()
-  })
+  }
+  ipcMain.on('app:allow-close', onAllowClose)
+  window.on('closed', () => ipcMain.off('app:allow-close', onAllowClose))
 
   window.on('close', (event) => {
     if (allowClose) {
@@ -50,6 +62,15 @@ function createWindow(): void {
   }
 }
 
+app.on('open-file', (event, path) => {
+  event.preventDefault()
+  void openFileInWindow(path).then((opened) => {
+    if (!opened && app.isReady()) {
+      createWindow()
+    }
+  })
+})
+
 let mcp: { close: () => Promise<void> } | null = null
 
 app.whenReady().then(async () => {
@@ -60,7 +81,7 @@ app.whenReady().then(async () => {
   createWindow()
 
   try {
-    mcp = await startMcpServer()
+    mcp = await startMcpServer(MCP_PORT, await mcpToken())
   } catch (error) {
     console.error('[mcp] could not start:', (error as Error).message)
   }

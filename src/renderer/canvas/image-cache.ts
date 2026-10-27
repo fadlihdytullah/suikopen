@@ -10,6 +10,9 @@ let onLoaded: () => void = () => {}
 
 export function setAssetBase(path: string | null): void {
   base = path
+  for (const entry of cache.values()) {
+    entry.image?.delete()
+  }
   cache.clear()
 }
 

@@ -2,7 +2,7 @@ import type { DocumentStore } from '../store/document-store'
 import type { SelectionStore } from '../store/selection'
 import { insertNode, newId, removeNodes, updateNodes, type NodePatch } from '../store/mutations'
 import { hitTest, itemsWithin } from '../canvas/hit-test'
-import { contains, itemById, sceneItems, unionBounds, type Rect, type SceneItem } from '../canvas/scene-index'
+import { contains, nodeById, sceneItems, unionBounds, type Rect, type SceneItem } from '../canvas/scene-index'
 import { requestZoom } from '../canvas/viewport-ref'
 import { canvasIsDark } from '../canvas/canvas-theme'
 import type { Node } from '../../shared/schema/node'
@@ -108,7 +108,7 @@ export function createPointerController({
   function containerAt(point: Point): SceneItem | undefined {
     const raw = store.getState()
     return items()
-      .filter((item) => item.node.type === 'frame' && !item.locked && contains(item, point) && itemById(raw, item.node.id))
+      .filter((item) => item.node.type === 'frame' && !item.locked && contains(item, point) && nodeById(raw, item.node.id))
       .sort((a, b) => b.depth - a.depth)[0]
   }
 
@@ -345,7 +345,7 @@ export function createPointerController({
       return
     }
     const hit = hitTest(items(), pointIn(event))
-    if (hit?.node.type === 'text' && itemById(store.getState(), hit.node.id)) {
+    if (hit?.node.type === 'text' && nodeById(store.getState(), hit.node.id)) {
       selection.set([hit.node.id])
       startTextEdit(hit.node.id)
     }
@@ -372,7 +372,7 @@ export function createPointerController({
 
     if (event.key === 'Enter' && plain && !event.shiftKey) {
       const [only, ...rest] = selectedItems()
-      if (only && rest.length === 0 && only.node.type === 'text' && itemById(store.getState(), only.node.id)) {
+      if (only && rest.length === 0 && only.node.type === 'text' && nodeById(store.getState(), only.node.id)) {
         event.preventDefault()
         startTextEdit(only.node.id)
         return

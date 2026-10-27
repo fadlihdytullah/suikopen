@@ -3,15 +3,14 @@
   "version": "0.1.0",
   "description": "Local-first design editor",
   "main": "out/main/index.js",
-  "directories": {
-    "doc": "docs"
-  },
   "scripts": {
     "test": "vitest run",
     "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
     "build": "electron-vite build",
+    "dist": "electron-vite build && electron-builder --mac --arm64",
     "preview": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node scripts/name-electron.mjs"
   },
   "keywords": [],
   "author": "",
@@ -22,6 +21,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
     "jsdom": "^30.1.3",
     "typescript": "^7.0.2",

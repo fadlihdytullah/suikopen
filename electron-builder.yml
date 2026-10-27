@@ -1,0 +1,21 @@
+appId: dev.suikopen.app
+productName: SuikoPen
+directories:
+  output: dist
+files:
+  - out/**
+  - package.json
+  - "!node_modules/@anthropic-ai/claude-agent-sdk-*/**"
+  - "!node_modules/@openai/codex-*-*/**"
+extraResources:
+  - from: fixtures/hello.spen
+    to: fixtures/hello.spen
+mac:
+  target: dir
+  category: public.app-category.graphics-design
+  identity: "-"
+  hardenedRuntime: false
+fileAssociations:
+  - ext: spen
+    name: SuikoPen Document
+    role: Editor

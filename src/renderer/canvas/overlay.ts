@@ -82,7 +82,9 @@ function paintAgentFocus(canvasKit: CanvasKit, canvas: Canvas, viewport: Viewpor
   glow.setStyle(canvasKit.PaintStyle.Stroke)
   glow.setStrokeWidth(4)
   glow.setAntiAlias(true)
-  glow.setMaskFilter(canvasKit.MaskFilter.MakeBlur(canvasKit.BlurStyle.Normal, 6, true))
+  const glowMask = canvasKit.MaskFilter.MakeBlur(canvasKit.BlurStyle.Normal, 6, true)
+  glow.setMaskFilter(glowMask)
+  glowMask.delete()
   canvas.drawRRect(shape, glow)
 
   const line = new canvasKit.Paint()

@@ -5,6 +5,7 @@ export const DEFAULT_FAMILY = 'Arial'
 const data = new Map<string, ArrayBuffer>()
 const requested = new Set<string>()
 let manager: FontMgr | null = null
+let generation = 0
 let onLoaded: () => void = () => {}
 
 function key(family: string, weight: number, italic: boolean): string {
@@ -15,6 +16,10 @@ export function onFontLoaded(callback: () => void): void {
   onLoaded = callback
 }
 
+export function fontGeneration(): number {
+  return generation
+}
+
 export function fontManager(): FontMgr | null {
   return manager
 }
@@ -22,6 +27,7 @@ export function fontManager(): FontMgr | null {
 function rebuild(canvasKit: CanvasKit): void {
   manager?.delete()
   manager = canvasKit.FontMgr.FromData(...data.values())
+  generation += 1
 }
 
 export async function ensureFont(

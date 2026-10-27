@@ -7,9 +7,11 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { DEFAULT_MODEL } from '../../shared/agent'
 import { MCP_SERVER_NAME } from '../mcp/server'
+import { mcpToken } from '../mcp/token'
 import { childEnvironment, cleanError, findExecutable, MCP_URL, systemPrompt, workspace, type ProviderRun } from './process'
 
-const BLOCKED_TOOLS = ['run_shell_command', 'write_file', 'replace']
+export const GEMINI_CORE_TOOLS = ['google_web_search', 'read_file', 'read_many_files']
+const BLOCKED_TOOLS = ['run_shell_command', 'write_file', 'replace', 'web_fetch', 'save_memory']
 
 type StreamEvent = {
   type?: string
@@ -48,7 +50,7 @@ export const runGemini: ProviderRun = async (request, signal, emit) => {
   await mkdir(join(cwd, '.gemini'), { recursive: true })
   await writeFile(
     join(cwd, '.gemini/settings.json'),
-    JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: { httpUrl: MCP_URL, trust: true } }, tools: { exclude: BLOCKED_TOOLS } }, null, 2)
+    JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: { httpUrl: MCP_URL, headers: { Authorization: `Bearer ${await mcpToken()}` }, trust: true } }, tools: { core: GEMINI_CORE_TOOLS, exclude: BLOCKED_TOOLS } }, null, 2)
   )
   const attachmentDir = join(cwd, 'attachments')
   await rm(attachmentDir, { recursive: true, force: true })

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
@@ -285,7 +286,15 @@ export function allowedRequest(origin: string | undefined, host: string | undefi
   }
 }
 
-export async function startMcpServer(port = MCP_PORT): Promise<{ http: Server; close: () => Promise<void> }> {
+export const MAX_BODY_BYTES = 1024 * 1024
+
+export function authorized(header: string | undefined, token: string): boolean {
+  const expected = Buffer.from(`Bearer ${token}`)
+  const actual = Buffer.from(header ?? '')
+  return actual.length === expected.length && timingSafeEqual(actual, expected)
+}
+
+export async function startMcpServer(port: number, token: string): Promise<{ http: Server; close: () => Promise<void> }> {
   registerBridge()
 
   const http = createServer((request, response) => {
@@ -299,8 +308,22 @@ export async function startMcpServer(port = MCP_PORT): Promise<{ http: Server; c
       return
     }
 
+    if (!authorized(request.headers.authorization, token)) {
+      response.writeHead(401).end('Reconnect suikopen in Settings > Integrations.')
+      return
+    }
+
     const chunks: Buffer[] = []
-    request.on('data', (chunk: Buffer) => chunks.push(chunk))
+    let size = 0
+    request.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > MAX_BODY_BYTES) {
+        response.writeHead(413).end('Request too large')
+        request.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
     request.on('end', () => {
       void (async () => {
         try {
@@ -344,7 +367,10 @@ export async function startMcpServer(port = MCP_PORT): Promise<{ http: Server; c
     })
   })
 
-  await new Promise<void>((resolve) => http.listen(port, '127.0.0.1', resolve))
+  await new Promise<void>((resolve, reject) => {
+    http.once('error', reject)
+    http.listen(port, '127.0.0.1', resolve)
+  })
 
   return {
     http,

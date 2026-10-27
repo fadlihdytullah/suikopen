@@ -1,10 +1,11 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, symlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { ModelReasoningEffort, UserInput } from '@openai/codex-sdk'
 import { promptWithText } from './attachments'
 import { DEFAULT_MODEL, FALLBACK_MODELS, isEffort, type AgentModelOption } from '../../shared/agent'
 import { MCP_SERVER_NAME } from '../mcp/server'
+import { mcpToken } from '../mcp/token'
 import { childEnvironment, cleanError, findExecutable, MCP_URL, runCommand, systemPrompt, workspace, type ProviderRun } from './process'
 
 type CachedModel = {
@@ -50,17 +51,41 @@ export function codexError(message: string): string {
   return /model is not supported when using Codex with a ChatGPT account/i.test(text) ? `${text} Pick another model.` : text
 }
 
+export const DISABLED_CODEX_FEATURES = [
+  'shell_tool',
+  'browser_use',
+  'browser_use_external',
+  'in_app_browser',
+  'computer_use',
+  'apps',
+  'plugins',
+  'image_generation',
+  'skill_mcp_dependency_install',
+]
+
+export async function codexHome(): Promise<string> {
+  const home = await workspace('codex-home')
+  await symlink(join(homedir(), '.codex/auth.json'), join(home, 'auth.json')).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'EEXIST') {
+      throw error
+    }
+  })
+  return home
+}
+
 export const runCodex: ProviderRun = async (request, signal, emit) => {
   const { Codex } = await import('@openai/codex-sdk')
   const executable = findExecutable('codex')
   const codex = new Codex({
-    env: childEnvironment(),
+    env: { ...childEnvironment(), CODEX_HOME: await codexHome(), SUIKOPEN_MCP_TOKEN: await mcpToken() },
     ...(executable ? { codexPathOverride: executable } : {}),
     config: {
+      features: Object.fromEntries(DISABLED_CODEX_FEATURES.map((feature) => [feature, false])),
       developer_instructions: await systemPrompt(request.skills),
       mcp_servers: {
         [MCP_SERVER_NAME]: {
           url: MCP_URL,
+          bearer_token_env_var: 'SUIKOPEN_MCP_TOKEN',
           default_tools_approval_mode: 'approve',
           startup_timeout_sec: 30,
           tool_timeout_sec: 300,

@@ -7,10 +7,15 @@ export type SceneItem = Rect & { node: Node; parent: ParentNode | null; parentId
 
 let cache = new WeakMap<Document, SceneItem[]>()
 let layouts = new WeakMap<Document, LayoutMap>()
+let itemIndex = new WeakMap<Document, Map<string, SceneItem>>()
+let nodeIndex = new WeakMap<Document, Map<string, Node>>()
+const parentIndex = new WeakMap<SceneItem[], Map<string, string | null>>()
 
 export function invalidateSceneCaches(): void {
   cache = new WeakMap()
   layouts = new WeakMap()
+  itemIndex = new WeakMap()
+  nodeIndex = new WeakMap()
 }
 
 export function layoutOf(document: Document): LayoutMap {
@@ -49,11 +54,39 @@ export function sceneItems(document: Document): SceneItem[] {
 }
 
 export function itemById(document: Document, id: string): SceneItem | undefined {
-  return sceneItems(document).find((item) => item.node.id === id)
+  let index = itemIndex.get(document)
+  if (!index) {
+    index = new Map(sceneItems(document).map((item) => [item.node.id, item]))
+    itemIndex.set(document, index)
+  }
+  return index.get(id)
+}
+
+export function nodeById(document: Document, id: string): Node | undefined {
+  let index = nodeIndex.get(document)
+  if (!index) {
+    const built = new Map<string, Node>()
+    const visit = (nodes: Node[]) => {
+      for (const node of nodes) {
+        built.set(node.id, node)
+        if (hasChildren(node)) {
+          visit(node.children)
+        }
+      }
+    }
+    visit(document.children)
+    index = built
+    nodeIndex.set(document, index)
+  }
+  return index.get(id)
 }
 
 export function parentChain(items: SceneItem[], id: string): string[] {
-  const parents = new Map(items.map((item) => [item.node.id, item.parentId]))
+  let parents = parentIndex.get(items)
+  if (!parents) {
+    parents = new Map(items.map((item) => [item.node.id, item.parentId]))
+    parentIndex.set(items, parents)
+  }
   const chain: string[] = []
   let current = parents.get(id) ?? null
 

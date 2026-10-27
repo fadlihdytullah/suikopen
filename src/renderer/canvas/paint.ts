@@ -1,17 +1,68 @@
-import type { Canvas, CanvasKit, Surface } from 'canvaskit-wasm'
+import type { Canvas, CanvasKit, Paragraph, Surface } from 'canvaskit-wasm'
 import type { Document } from '../../shared/schema/document'
-import type { Node } from '../../shared/schema/node'
+import { asNumber, toArray, type Node, type TextNodeValue } from '../../shared/schema/node'
 import { buildParagraph } from '../text/paragraph'
+import { fontGeneration } from '../text/font-manager'
 import { layerBlurRadius, paintInnerShadows, paintOuterShadows, paintStroke } from './effects'
 import { fillPaints } from './fills'
 import { paintOverlay, type OverlayScene } from './overlay'
-import { sceneItems, type Rect } from './scene-index'
+import { intersects, sceneItems, type Rect } from './scene-index'
 import { nodePath } from './shapes'
 import type { Viewport } from './viewport'
 import { revealAlpha } from '../agent/presence'
 import { canvasBackground, canvasStripe } from './canvas-theme'
 
 const STRIPE_GAP = 8
+
+type CachedParagraph = { width: number; generation: number; paragraph: Paragraph; used: boolean }
+
+const paragraphs = new Map<Node, CachedParagraph>()
+
+function cachedParagraph(canvasKit: CanvasKit, node: TextNodeValue, width: number): Paragraph | null {
+  const entry = paragraphs.get(node)
+  if (entry && entry.width === width && entry.generation === fontGeneration()) {
+    entry.used = true
+    return entry.paragraph
+  }
+  entry?.paragraph.delete()
+  paragraphs.delete(node)
+  const paragraph = buildParagraph(canvasKit, node, width)
+  if (paragraph) {
+    paragraphs.set(node, { width, generation: fontGeneration(), paragraph, used: true })
+  }
+  return paragraph
+}
+
+function sweepParagraphs(): void {
+  for (const [node, entry] of paragraphs) {
+    if (entry.used) {
+      entry.used = false
+    } else {
+      entry.paragraph.delete()
+      paragraphs.delete(node)
+    }
+  }
+}
+
+function bleed(node: Node): number {
+  const stroke = node.stroke && node.stroke.enabled !== false ? (node.stroke.width ?? 1) : 0
+  let margin = stroke + (node.type === 'text' ? asNumber(node.fontSize, 16) * 2 : 0)
+  for (const effect of toArray(node.effect)) {
+    if (effect.enabled === false) {
+      continue
+    }
+    margin +=
+      effect.type === 'blur'
+        ? effect.radius * 3
+        : (effect.blur ?? 0) * 2 + Math.max(Math.abs(effect.offset?.x ?? 0), Math.abs(effect.offset?.y ?? 0))
+  }
+  return margin
+}
+
+function visible(rect: Rect, node: Node, view: Rect): boolean {
+  const margin = bleed(node)
+  return intersects({ x: rect.x - margin, y: rect.y - margin, width: rect.width + margin * 2, height: rect.height + margin * 2 }, view)
+}
 
 
 function paintItem(canvasKit: CanvasKit, canvas: Canvas, node: Node, rect: Rect): void {
@@ -24,7 +75,9 @@ function paintItem(canvasKit: CanvasKit, canvas: Canvas, node: Node, rect: Rect)
 
   if (layered) {
     const paint = new canvasKit.Paint()
-    paint.setImageFilter(canvasKit.ImageFilter.MakeBlur(blur, blur, canvasKit.TileMode.Decal, null))
+    const filter = canvasKit.ImageFilter.MakeBlur(blur, blur, canvasKit.TileMode.Decal, null)
+    paint.setImageFilter(filter)
+    filter.delete()
     canvas.saveLayer(paint)
     paint.delete()
   }
@@ -41,10 +94,9 @@ function paintItem(canvasKit: CanvasKit, canvas: Canvas, node: Node, rect: Rect)
   }
 
   if (node.type === 'text') {
-    const paragraph = buildParagraph(canvasKit, node, rect.width)
+    const paragraph = cachedParagraph(canvasKit, node, rect.width)
     if (paragraph) {
       canvas.drawParagraph(paragraph, rect.x, rect.y)
-      paragraph.delete()
     }
   }
 
@@ -95,8 +147,13 @@ export function paintScene(canvasKit: CanvasKit, surface: Surface, scene: Scene)
   canvas.scale(scene.viewport.scale, scene.viewport.scale)
 
   const now = performance.now()
+  const { x, y, scale } = scene.viewport
+  const view = { x: -x / scale, y: -y / scale, width: surface.width() / scene.dpr / scale, height: surface.height() / scene.dpr / scale }
 
   for (const item of sceneItems(scene.document)) {
+    if (item.node.type === 'group' || !visible(item, item.node, view)) {
+      continue
+    }
     const alpha = revealAlpha(item.node.id, now)
     if (alpha <= 0) {
       continue
@@ -114,6 +171,7 @@ export function paintScene(canvasKit: CanvasKit, surface: Surface, scene: Scene)
   }
 
   canvas.restore()
+  sweepParagraphs()
 
   paintOverlay(canvasKit, canvas, scene.viewport, scene.overlay)
 

@@ -1,8 +1,13 @@
-import type { CanvasKit, Paint } from 'canvaskit-wasm'
+import type { CanvasKit, Paint, Shader } from 'canvaskit-wasm'
 import { toArray, type FillsValue, type FillValue } from '../../shared/schema/node'
 import { parseHexColor } from './color'
 import { getImage } from './image-cache'
 import type { Rect } from './scene-index'
+
+function attachShader(paint: Paint, shader: Shader): void {
+  paint.setShader(shader)
+  shader.delete()
+}
 
 function color4f(canvasKit: CanvasKit, hex: string, opacity = 1): Float32Array {
   const [r, g, b, a] = parseHexColor(hex)
@@ -51,7 +56,7 @@ function buildPaint(canvasKit: CanvasKit, fill: FillValue, rect: Rect, alpha: nu
 
     if (kind === 'radial') {
       const center = Float32Array.of(rect.x + rect.width / 2, rect.y + rect.height / 2)
-      paint.setShader(
+      attachShader(paint, 
         canvasKit.Shader.MakeRadialGradient(
           center,
           Math.max(rect.width, rect.height) / 2,
@@ -64,7 +69,7 @@ function buildPaint(canvasKit: CanvasKit, fill: FillValue, rect: Rect, alpha: nu
     }
 
     if (kind === 'angular') {
-      paint.setShader(
+      attachShader(paint, 
         canvasKit.Shader.MakeSweepGradient(
           rect.x + rect.width / 2,
           rect.y + rect.height / 2,
@@ -77,7 +82,7 @@ function buildPaint(canvasKit: CanvasKit, fill: FillValue, rect: Rect, alpha: nu
     }
 
     const [start, end] = gradientPoints(rect, fill.rotation ?? 0)
-    paint.setShader(canvasKit.Shader.MakeLinearGradient(start, end, colors, positions, canvasKit.TileMode.Clamp))
+    attachShader(paint, canvasKit.Shader.MakeLinearGradient(start, end, colors, positions, canvasKit.TileMode.Clamp))
     return paint
   }
 
@@ -105,7 +110,7 @@ function buildPaint(canvasKit: CanvasKit, fill: FillValue, rect: Rect, alpha: nu
     canvasKit.Matrix.scaled(sx, sy)
   )
 
-  paint.setShader(
+  attachShader(paint, 
     image.makeShaderOptions(
       canvasKit.TileMode.Decal,
       canvasKit.TileMode.Decal,

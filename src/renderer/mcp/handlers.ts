@@ -1,7 +1,8 @@
 import type { AgentRequest, NodeSummary } from '../../shared/mcp/contract'
-import { hasChildren, NodeSchema, type Node } from '../../shared/schema/node'
+import { hasChildren, NodeSchema, toArray, type Node } from '../../shared/schema/node'
+import { allowedImageUrl, IMAGE_HOSTS } from '../../shared/image-hosts'
 import { VariableSchema, type Variable } from '../../shared/schema/document'
-import { itemById, parentChain, sceneItems, type Rect, type SceneItem } from '../canvas/scene-index'
+import { itemById, nodeById, parentChain, sceneItems, type Rect, type SceneItem } from '../canvas/scene-index'
 import { resolvedDocument } from '../document/current'
 import { activeTheme, setActiveTheme } from '../document/resolved'
 import { detachInstance } from '../store/mutations'
@@ -38,9 +39,21 @@ function summarise(item: SceneItem, withChildren = false): NodeSummary {
   return summary
 }
 
+function refuseRemoteImages(node: Node): void {
+  for (const fill of toArray(node.fill)) {
+    if (typeof fill === 'object' && fill.type === 'image' && /^https?:/i.test(fill.url) && !allowedImageUrl(fill.url)) {
+      throw new Error(`Image "${fill.url}" was refused: images load only over https from ${IMAGE_HOSTS.join(', ')}. Use find_icons for icons and logos.`)
+    }
+  }
+  if (hasChildren(node)) {
+    node.children.forEach(refuseRemoteImages)
+  }
+}
+
 function validNode(candidate: unknown): Node {
   const result = NodeSchema.safeParse(candidate)
   if (result.success) {
+    refuseRemoteImages(result.data)
     return result.data
   }
   const issue = result.error.issues[0]
@@ -78,14 +91,6 @@ function findNode(nodes: Node[], id: string): Node | null {
     }
   }
   return null
-}
-
-function withoutProblems(value: unknown): unknown {
-  if (typeof value !== 'object' || value === null || !('problems' in value)) {
-    return value
-  }
-  const { problems: _ignored, ...rest } = value as Record<string, unknown>
-  return rest
 }
 
 function insertInto(nodes: Node[], parentId: string | null, child: Node): boolean {
@@ -127,8 +132,13 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
     return item
   }
 
+  let batching = false
+
   function withProblems(id: string) {
     const item = node(id)
+    if (batching) {
+      return summarise(item)
+    }
     const problems = findProblems(items(), item.parentId ?? id)
     return problems.length ? { ...summarise(item), problems } : summarise(item)
   }
@@ -217,11 +227,11 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
       if (typeof props !== 'object' || props === null) {
         throw new Error('Missing required object parameter "props".')
       }
-      const raw = itemById(store.getState(), id)
+      const raw = nodeById(store.getState(), id)
       if (!raw) {
         throw new Error(`Node "${id}" is inside a component instance; update the master or detach the instance.`)
       }
-      validNode({ ...raw.node, ...(props as Record<string, unknown>), id })
+      validNode({ ...raw, ...(props as Record<string, unknown>), id })
       setNodeProps(store, 'Agent update', [id], props as Record<string, unknown>)
       return withProblems(id)
     },
@@ -259,8 +269,8 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
     detach_instance: (params) => {
       const id = requireString(params, 'id')
       const item = node(id)
-      const raw = itemById(store.getState(), id)
-      if (!raw || raw.node.type !== 'ref') {
+      const raw = nodeById(store.getState(), id)
+      if (!raw || raw.type !== 'ref') {
         throw new Error(`Node "${id}" is not a component instance.`)
       }
       detachInstance(store, id, item.node)
@@ -310,7 +320,7 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
       }
 
       const child = validNode(spec)
-      if (itemById(store.getState(), child.id)) {
+      if (nodeById(store.getState(), child.id)) {
         throw new Error(`A node with id "${child.id}" already exists.`)
       }
       let inserted = false
@@ -347,6 +357,7 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
     const start = store.getState()
     const results: unknown[] = []
     store.beginGesture('Agent batch')
+    batching = true
     try {
       ops.forEach((op: unknown, index) => {
         const { tool: method, ...rest } = (typeof op === 'object' && op !== null ? op : {}) as Record<string, unknown>
@@ -355,18 +366,20 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
           throw new Error(`Operation ${index + 1}: "tool" must be one of ${BATCHABLE.join(', ')}.`)
         }
         try {
-          results.push(withoutProblems(writer(rest)))
+          results.push(writer(rest))
         } catch (error) {
           throw new Error(`Operation ${index + 1} (${method}) failed: ${(error as Error).message} Nothing in this batch was applied.`)
         }
       })
     } catch (error) {
+      batching = false
       store.endGesture()
       if (store.getState() !== start) {
         store.undo()
       }
       throw error
     }
+    batching = false
     store.endGesture()
 
     const all = items()

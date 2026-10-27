@@ -19,6 +19,11 @@ contextBridge.exposeInMainWorld('suikopen', {
     ipcRenderer.on('menu:command', handler)
     return () => ipcRenderer.off('menu:command', handler)
   },
+  onDocumentOpened: (callback: (result: OpenResult) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, result: OpenResult): void => callback(result)
+    ipcRenderer.on('document:opened', handler)
+    return () => ipcRenderer.off('document:opened', handler)
+  },
   onCloseRequest: (callback: () => void) => {
     const handler = (): void => callback()
     ipcRenderer.on('app:close-request', handler)

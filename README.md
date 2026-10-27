@@ -31,6 +31,8 @@ npm run dev
 
 Build a production bundle with `npm run build`, then start it with `npm run preview`.
 
+To get a standalone app, run `npm run dist`. It writes `dist/mac-arm64/SuikoPen.app`; copy it to `/Applications`. The app is ad-hoc signed, so the first time, right-click it and choose Open. It uses the `claude`, `codex` and `gemini` CLIs installed on your Mac.
+
 ## Set up the agent
 
 1. Open **Settings** with `⌘,` and choose **Agents**.

@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { itemById } from '../canvas/scene-index'
+import { itemById, nodeById } from '../canvas/scene-index'
 import { currentViewport, onViewportChange } from '../canvas/viewport-ref'
 import { toScreen } from '../canvas/viewport'
 import { resolvedDocument } from '../document/current'
@@ -14,8 +14,8 @@ function Field({ id, gestureOpen }: { id: string; gestureOpen: boolean }): React
   const ref = useRef<HTMLTextAreaElement>(null)
   const done = useRef(false)
   const [, rerender] = useReducer((count: number) => count + 1, 0)
-  const raw = itemById(store.getState(), id)
-  const [value, setValue] = useState(raw?.node.type === 'text' ? raw.node.content : '')
+  const raw = nodeById(store.getState(), id)
+  const [value, setValue] = useState(raw?.type === 'text' ? raw.content : '')
   const valueRef = useRef(value)
   valueRef.current = value
 

@@ -20,17 +20,47 @@ function findDraft(nodes: Draft<Node>[], id: string): Draft<Node> | undefined {
   return undefined
 }
 
+function indexPaths(nodes: Node[], ids: ReadonlySet<string>): Map<string, number[]> {
+  const found = new Map<string, number[]>()
+  const visit = (list: Node[], prefix: number[]) => {
+    list.forEach((node, index) => {
+      if (found.size === ids.size) {
+        return
+      }
+      const path = [...prefix, index]
+      if (ids.has(node.id)) {
+        found.set(node.id, path)
+      }
+      if (hasChildren(node)) {
+        visit(node.children, path)
+      }
+    })
+  }
+  visit(nodes, [])
+  return found
+}
+
+function draftsByPath(draft: Draft<Document>, paths: Map<string, number[]>): [string, Draft<Node>][] {
+  return [...paths].map(([id, path]) => {
+    let list = draft.children as Draft<Node>[]
+    let node = list[path[0]!]!
+    for (const index of path.slice(1)) {
+      list = (node as Draft<Node> & { children: Draft<Node>[] }).children
+      node = list[index]!
+    }
+    return [id, node]
+  })
+}
+
 export function updateNodes(store: DocumentStore, label: string | null, patches: Map<string, NodePatch>): void {
   if (patches.size === 0) {
     return
   }
 
+  const paths = indexPaths(store.getState().children, new Set(patches.keys()))
   store.apply(label, (draft: Draft<Document>) => {
-    for (const [id, patch] of patches) {
-      const node = findDraft(draft.children as Draft<Node>[], id)
-      if (!node) {
-        continue
-      }
+    for (const [id, node] of draftsByPath(draft, paths)) {
+      const patch = patches.get(id)!
       if (patch.x !== undefined) {
         node.x = patch.x
       }
@@ -81,12 +111,9 @@ export function setNodeProps(
     return
   }
 
+  const paths = indexPaths(store.getState().children, new Set(targets))
   store.apply(label, (draft: Draft<Document>) => {
-    for (const id of targets) {
-      const node = findDraft(draft.children as Draft<Node>[], id)
-      if (!node) {
-        continue
-      }
+    for (const [, node] of draftsByPath(draft, paths)) {
       for (const [key, value] of Object.entries(patch)) {
         if (value === undefined) {
           delete (node as Record<string, unknown>)[key]

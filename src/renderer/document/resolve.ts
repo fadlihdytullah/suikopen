@@ -26,19 +26,59 @@ export function resolveValue(value: unknown, variables: Record<string, Variable>
   }
 
   if (Array.isArray(value)) {
-    return value.map((entry) => resolveValue(entry, variables, theme))
+    const next = value.map((entry) => resolveValue(entry, variables, theme))
+    return next.every((entry, index) => entry === value[index]) ? value : next
   }
 
   if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
-        key,
-        key === 'id' || key === 'masterId' ? entry : resolveValue(entry, variables, theme),
-      ])
-    )
+    let changed = false
+    const next: Record<string, unknown> = {}
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      const resolvedEntry = key === 'id' || key === 'masterId' ? entry : resolveValue(entry, variables, theme)
+      changed ||= resolvedEntry !== entry
+      next[key] = resolvedEntry
+    }
+    return changed ? next : value
   }
 
   return value
+}
+
+let valueMemo = { variables: null as Record<string, Variable> | null, themeKey: '', nodes: new WeakMap<Node, Node>() }
+
+function resolveNodes(nodes: Node[], variables: Record<string, Variable>, theme: ThemeSelection): Node[] {
+  const themeKey = JSON.stringify(theme)
+  if (valueMemo.variables !== variables || valueMemo.themeKey !== themeKey) {
+    valueMemo = { variables, themeKey, nodes: new WeakMap() }
+  }
+  const memo = valueMemo.nodes
+
+  const visit = (list: Node[]): Node[] => {
+    const next = list.map((node) => {
+      const cached = memo.get(node)
+      if (cached) {
+        return cached
+      }
+      let changed = false
+      const out: Record<string, unknown> = {}
+      for (const [key, entry] of Object.entries(node)) {
+        const resolvedEntry =
+          key === 'children' ? visit(entry as Node[]) : key === 'id' || key === 'masterId' ? entry : resolveValue(entry, variables, theme)
+        changed ||= resolvedEntry !== entry
+        out[key] = resolvedEntry
+      }
+      const result = changed ? (out as Node) : node
+      memo.set(node, result)
+      return result
+    })
+    return same(list, next)
+  }
+
+  return visit(nodes)
+}
+
+function same<T>(previous: T[], next: T[]): T[] {
+  return previous.length === next.length && next.every((entry, index) => entry === previous[index]) ? previous : next
 }
 
 function collectMasters(nodes: Node[], into: Map<string, Node>): void {
@@ -74,11 +114,16 @@ function namespace(node: Node, prefix: string): Node {
   return { ...next, children: next.children.map((child) => namespace(child, prefix)) } as Node
 }
 
-function expand(nodes: Node[], masters: Map<string, Node>, visiting: Set<string>, depth: number): Node[] {
-  return nodes.flatMap((node): Node[] => {
+type Expansion = { deps: Node[]; result: Node }
+
+const expansions = new WeakMap<Node, Expansion>()
+
+function expand(nodes: Node[], masters: Map<string, Node>, visiting: Set<string>, depth: number, deps: Node[]): Node[] {
+  const next = nodes.flatMap((node): Node[] => {
     if (node.type !== 'ref') {
       if (hasChildren(node)) {
-        return [{ ...node, children: expand(node.children, masters, visiting, depth) } as Node]
+        const children = expand(node.children, masters, visiting, depth, deps)
+        return [children === node.children ? node : ({ ...node, children } as Node)]
       }
       return [node]
     }
@@ -97,6 +142,12 @@ function expand(nodes: Node[], masters: Map<string, Node>, visiting: Set<string>
       throw new Error(`Instances nested deeper than ${MAX_INSTANCE_DEPTH} levels.`)
     }
 
+    const cached = expansions.get(node)
+    if (cached && cached.deps.every((dep) => masters.get(dep.id) === dep)) {
+      deps.push(...cached.deps)
+      return [cached.result]
+    }
+
     const overridden = applyOverrides(master, master.id, node.overrides ?? {})
     const placed = {
       ...namespace(overridden, node.id),
@@ -105,36 +156,50 @@ function expand(nodes: Node[], masters: Map<string, Node>, visiting: Set<string>
       y: node.y,
     } as Node
 
+    const own: Node[] = [master]
     visiting.add(node.masterId)
-    const [result] = expand([placed], masters, visiting, depth + 1)
+    const [result] = expand([placed], masters, visiting, depth + 1, own)
     visiting.delete(node.masterId)
 
-    return result ? [result] : []
+    if (!result) {
+      return []
+    }
+    expansions.set(node, { deps: own, result })
+    deps.push(...own)
+    return [result]
   })
+
+  return same(nodes, next)
 }
 
 function dropHidden(nodes: Node[]): Node[] {
-  return nodes
-    .filter((node) => node.visible !== false)
-    .map((node) => (hasChildren(node) ? ({ ...node, children: dropHidden(node.children) } as Node) : node))
+  const visible = nodes.filter((node) => node.visible !== false)
+  const next = visible.map((node) => {
+    if (!hasChildren(node)) {
+      return node
+    }
+    const children = dropHidden(node.children)
+    return children === node.children ? node : ({ ...node, children } as Node)
+  })
+  return same(nodes, next)
 }
 
 export type ResolveResult = { document: Document; error: string | null }
 
 export function resolveDocument(document: Document, theme: ThemeSelection = {}): ResolveResult {
   const variables = document.variables ?? {}
-  const withValues = (
-    variables && Object.keys(variables).length > 0
-      ? (resolveValue({ ...document, variables: undefined }, variables, theme) as Document)
-      : document
-  )
+  const hasVariables = Object.keys(variables).length > 0
+  const values = hasVariables ? resolveNodes(document.children, variables, theme) : document.children
 
   const masters = new Map<string, Node>()
-  collectMasters(withValues.children, masters)
+  collectMasters(values, masters)
+
+  const finish = (children: Node[]): Document =>
+    !hasVariables && children === document.children ? document : { ...document, variables: undefined, children }
 
   try {
-    return { document: { ...withValues, children: dropHidden(expand(withValues.children, masters, new Set(), 0)) }, error: null }
+    return { document: finish(dropHidden(expand(values, masters, new Set(), 0, []))), error: null }
   } catch (error) {
-    return { document: { ...withValues, children: dropHidden(withValues.children) }, error: (error as Error).message }
+    return { document: finish(dropHidden(values)), error: (error as Error).message }
   }
 }
