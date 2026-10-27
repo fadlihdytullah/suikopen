@@ -29,7 +29,7 @@ export async function installIntoClaudeCode(path = claudeConfigPath(), port = MC
   }
 
   if (text) {
-    await writeFile(`${path}.suikopen-backup`, text, 'utf8')
+    await writeFile(`${path}.suikopen-backup`, text, { encoding: 'utf8', mode: 0o600 })
   }
 
   config['mcpServers'] = { ...servers, [SERVER_KEY]: wanted }
@@ -75,7 +75,7 @@ function parseConfig(text: string | null, path: string): Record<string, unknown>
 async function writeAtomic(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   const temporary = `${path}.suikopen-tmp`
-  await writeFile(temporary, content, 'utf8')
+  await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600 })
   await rename(temporary, path)
 }
 
@@ -100,7 +100,7 @@ export async function installIntoCodex(path = codexConfigPath(), port = MCP_PORT
     return { changed: false, path, reason: 'already installed' }
   }
   if (text) {
-    await writeFile(`${path}.suikopen-backup`, text, 'utf8')
+    await writeFile(`${path}.suikopen-backup`, text, { encoding: 'utf8', mode: 0o600 })
   }
   const next = section ? text.replace(section, `${block}\n`) : `${text}${text && !text.endsWith('\n') ? '\n' : ''}${text ? '\n' : ''}${block}`
   await writeAtomic(path, next)
@@ -117,7 +117,7 @@ export async function installIntoGemini(path = geminiConfigPath(), port = MCP_PO
     return { changed: false, path, reason: 'already installed' }
   }
   if (text) {
-    await writeFile(`${path}.suikopen-backup`, text, 'utf8')
+    await writeFile(`${path}.suikopen-backup`, text, { encoding: 'utf8', mode: 0o600 })
   }
   config['mcpServers'] = { ...servers, [SERVER_KEY]: wanted }
   await writeAtomic(path, `${JSON.stringify(config, null, 2)}\n`)
