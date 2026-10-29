@@ -1,5 +1,5 @@
 import type { ChatEntry } from './agent'
-import type { MemoryNote } from './schema/memory'
+import { memoryBlock, type MemoryNote } from './schema/memory'
 
 const EDIT_TOOLS = new Set(['create_node', 'update_node', 'move_node', 'set_text', 'delete_nodes', 'detach_instance'])
 
@@ -31,6 +31,8 @@ export type HandoffInput = {
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
 
+const inline = (text: string, max = 80) => clip(text.replace(/\s+/g, ' ').replace(/[`<>]/g, ''), max)
+
 export function changedIds(entries: readonly ChatEntry[]): string[] {
   return [...new Set(entries.flatMap((entry) => (entry.kind === 'tools' ? (entry.ids ?? []) : [])))]
 }
@@ -49,7 +51,7 @@ export function buildHandoff(input: HandoffInput): string {
   }
 
   const lines = [
-    `# Design handoff — ${input.tab.name}`,
+    `# Design handoff — ${inline(input.tab.name)}`,
     '',
     `File: ${input.path ?? 'Untitled (not saved yet)'} · SuikoPen tab \`${input.tab.id}\``,
   ]
@@ -60,18 +62,18 @@ export function buildHandoff(input: HandoffInput): string {
     lines.push('', '## Result', clip(summary.trim(), 2000))
   }
   if (input.memory.length) {
-    lines.push('', '## Decisions and conventions', ...input.memory.map((note) => `- [${note.kind}${note.key ? ` · ${note.key}` : ''}] ${note.text}`))
+    lines.push('', '## Decisions and conventions', memoryBlock(input.memory))
   }
   if (screens.size || input.missing.length) {
     lines.push('', '## Changed in the design')
     for (const [id, group] of screens) {
       const inner = group.nodes.filter((node) => node.id !== id)
-      const listed = inner.slice(0, 12).map((node) => `\`${node.id}\``).join(', ')
+      const listed = inner.slice(0, 12).map((node) => `\`${inline(node.id, 64)}\``).join(', ')
       const more = inner.length > 12 ? ` and ${inner.length - 12} more` : ''
-      lines.push(`- Screen "${group.name}" (\`${id}\`)${inner.length ? `: ${listed}${more}` : ''}`)
+      lines.push(`- Screen "${inline(group.name)}" (\`${inline(id, 64)}\`)${inner.length ? `: ${listed}${more}` : ''}`)
     }
     if (input.missing.length) {
-      lines.push(`- Removed: ${input.missing.slice(0, 20).map((id) => `\`${id}\``).join(', ')}`)
+      lines.push(`- Removed: ${input.missing.slice(0, 20).map((id) => `\`${inline(id, 64)}\``).join(', ')}`)
     }
   }
   lines.push(
