@@ -8,7 +8,7 @@ import type { AgentEvent, AgentRunRequest } from '../../shared/agent'
 import { MCP_PATH, MCP_PORT } from '../mcp/server'
 import { DESIGNER_PROMPT } from './prompt'
 import { skillInstructions } from './skills'
-import { memoryBlock, MemorySchema } from '../../shared/schema/memory'
+import { asData, memoryBlock, MemorySchema } from '../../shared/schema/memory'
 
 export type RunResult = { sessionId: string | null; costUsd: number | null; error: string | null; contextTokens?: number | null }
 
@@ -78,7 +78,7 @@ export const HANDOFF_LIMIT = 6_000
 
 function handoffNote(handoff?: string): string {
   return handoff
-    ? `\n\nThis chat was compacted. Summary of the earlier conversation, written by you:\n<handoff>\n${handoff.slice(0, HANDOFF_LIMIT).replaceAll('</handoff>', '')}\n</handoff>`
+    ? `\n\nThis chat was compacted. Summary of the earlier conversation, written by you:\n<handoff>\n${asData(handoff.slice(0, HANDOFF_LIMIT))}\n</handoff>`
     : ''
 }
 

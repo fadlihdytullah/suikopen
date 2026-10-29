@@ -1,5 +1,5 @@
 import type { CompactRequest, CompactResult } from '../../shared/agent'
-import { MEMORY_KINDS, MEMORY_LIMITS } from '../../shared/schema/memory'
+import { asData, MEMORY_KINDS, MEMORY_LIMITS } from '../../shared/schema/memory'
 
 export const TRANSCRIPT_LIMIT = 60_000
 
@@ -11,7 +11,7 @@ notes: only lasting facts about this design that later sessions must keep (brand
 export function compactPrompt(request: Pick<CompactRequest, 'sessionId' | 'transcript'>): string {
   return request.sessionId
     ? INSTRUCTIONS
-    : `${INSTRUCTIONS}\n\nConversation so far:\n<transcript>\n${request.transcript.slice(-TRANSCRIPT_LIMIT).replaceAll('</transcript>', '')}\n</transcript>`
+    : `${INSTRUCTIONS}\n\nConversation so far:\n<transcript>\n${asData(request.transcript.slice(-TRANSCRIPT_LIMIT))}\n</transcript>`
 }
 
 export function parseCompaction(reply: string): CompactResult {
