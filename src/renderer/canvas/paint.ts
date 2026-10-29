@@ -9,7 +9,6 @@ import { paintOverlay, type OverlayScene } from './overlay'
 import { intersects, sceneItems, type Rect } from './scene-index'
 import { nodePath } from './shapes'
 import type { Viewport } from './viewport'
-import { revealAlpha } from '../agent/presence'
 import { canvasBackground, canvasStripe } from './canvas-theme'
 
 const STRIPE_GAP = 8
@@ -115,6 +114,7 @@ export type Scene = {
   viewport: Viewport
   dpr: number
   overlay: OverlayScene
+  reveal?: (id: string, now: number) => number
 }
 
 function paintStripes(canvasKit: CanvasKit, canvas: Canvas, width: number, height: number): void {
@@ -154,7 +154,7 @@ export function paintScene(canvasKit: CanvasKit, surface: Surface, scene: Scene)
     if (item.node.type === 'group' || !visible(item, item.node, view)) {
       continue
     }
-    const alpha = revealAlpha(item.node.id, now)
+    const alpha = scene.reveal ? scene.reveal(item.node.id, now) : 1
     if (alpha <= 0) {
       continue
     }
@@ -179,14 +179,22 @@ export function paintScene(canvasKit: CanvasKit, surface: Surface, scene: Scene)
   surface.flush()
 }
 
-export function renderNodePng(canvasKit: CanvasKit, document: Document, id: string, scale = 2): string | null {
+export const SNAPSHOT_MAX_SIDE = 4096
+export const SNAPSHOT_MAX_PIXELS = 8_000_000
+
+export function snapshotScale(width: number, height: number, wanted = 2): number {
+  return Math.min(wanted, SNAPSHOT_MAX_SIDE / Math.max(width, height), Math.sqrt(SNAPSHOT_MAX_PIXELS / (width * height)))
+}
+
+export function renderNodePng(canvasKit: CanvasKit, document: Document, id: string, wanted = 2): string | null {
   const items = sceneItems(document)
   const root = items.find((item) => item.node.id === id)
   if (!root || root.width <= 0 || root.height <= 0) {
     return null
   }
 
-  const surface = canvasKit.MakeSurface(Math.ceil(root.width * scale), Math.ceil(root.height * scale))
+  const scale = snapshotScale(root.width, root.height, wanted)
+  const surface = canvasKit.MakeSurface(Math.max(1, Math.ceil(root.width * scale)), Math.max(1, Math.ceil(root.height * scale)))
   if (!surface) {
     return null
   }
@@ -208,7 +216,7 @@ export function renderNodePng(canvasKit: CanvasKit, document: Document, id: stri
   const image = surface.makeImageSnapshot()
   const bytes = image.encodeToBytes()
   image.delete()
-  surface.delete()
+  surface.dispose()
 
   if (!bytes) {
     return null

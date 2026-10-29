@@ -15,7 +15,12 @@ export type History = {
   canRedo: () => boolean
   isOpen: () => boolean
   depth: () => { past: number; future: number }
+  snapshot: () => HistorySnapshot
+  restore: (snapshot: HistorySnapshot) => void
+  clear: () => void
 }
+
+export type HistorySnapshot = { past: HistoryEntry[]; future: HistoryEntry[] }
 
 export function createHistory(limit = HISTORY_LIMIT): History {
   const past: HistoryEntry[] = []
@@ -88,5 +93,15 @@ export function createHistory(limit = HISTORY_LIMIT): History {
     canRedo: () => future.length > 0,
     isOpen: () => pending !== null,
     depth: () => ({ past: past.length, future: future.length }),
+    snapshot: () => ({ past: [...past], future: [...future] }),
+    restore: (snapshot) => {
+      past.splice(0, past.length, ...snapshot.past.slice(-limit))
+      future.splice(0, future.length, ...snapshot.future)
+    },
+    clear: () => {
+      pending = null
+      past.length = 0
+      future.length = 0
+    },
   }
 }

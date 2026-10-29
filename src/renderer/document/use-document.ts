@@ -1,35 +1,45 @@
 import { useEffect, useState } from 'react'
 import type { Document } from '../../shared/schema/document'
-import type { Asset, DiscardChoice, OpenResult, SaveResult } from '../../main/ipc'
+import type { Asset, DiscardChoice, InitialResult, OpenedDocument, OpenResult, SaveResult } from '../../main/ipc'
 import type { MenuCommand } from '../../main/menu'
-import type { AgentRequest } from '../../shared/mcp/contract'
-import type { ChatRecord, ChatSummary, AgentAttachmentResult, AgentEvent, AgentModelOption, AgentProviderId, AgentProviderStatus, AgentRunRequest, AgentSkill, AgentTestResult } from '../../shared/agent'
+import type { AgentReply, AgentRequest } from '../../shared/mcp/contract'
+import type { ChatRecord, ChatSummary, AgentAttachmentResult, AgentEvent, AgentModelOption, AgentProviderId, AgentProviderStatus, AgentRunRequest, AgentSkill, AgentTestResult, CompactRequest, CompactResult } from '../../shared/agent'
 
 declare global {
   interface Window {
     suikopen: {
       platform: string
-      openInitialDocument: () => Promise<OpenResult>
+      openInitialDocument: () => Promise<InitialResult>
       openDocumentDialog: () => Promise<OpenResult | { cancelled: true }>
-      saveDocument: (request: { path: string | null; document: Document; saveAs?: boolean }) => Promise<SaveResult>
+      saveDocument: (request: { tabId?: string; path: string | null; document: Document; saveAs?: boolean }) => Promise<SaveResult>
       setWindowState: (state: { path: string | null; edited: boolean }) => Promise<void>
-      confirmDiscard: () => Promise<DiscardChoice>
+      checkpoint: (state: { tabId: string; document: Document; path: string | null; assetBase: string | null; dirty: boolean }) => void
+      confirmDiscard: (name?: string) => Promise<DiscardChoice>
+      newTabId: () => Promise<string>
+      confirmStopAgent: (name: string) => Promise<boolean>
+      tabClosed: (id: string) => void
+      spillHistory: (id: string, json: string) => Promise<void>
+      takeHistory: (id: string) => Promise<string | null>
+      syncTabs: (list: { id: string; name: string; active: boolean }[]) => void
+      onTabActivate: (callback: (id: string) => void) => () => void
       onMenuCommand: (callback: (command: MenuCommand) => void) => () => void
       onDocumentOpened: (callback: (result: OpenResult) => void) => () => void
       onCloseRequest: (callback: () => void) => () => void
       allowClose: () => void
+      reportError: (message: string, fatal?: boolean) => void
       readAsset: (request: { base: string | null; url: string }) => Promise<Asset | null>
       readFont: (request: { family: string; weight?: number; italic?: boolean }) => Promise<ArrayBuffer | null>
-      onAgentCall: (handler: (request: AgentRequest) => Promise<unknown>) => () => void
+      onAgentCall: (handler: (request: AgentRequest) => Promise<AgentReply>) => () => void
       runAgent: (request: AgentRunRequest) => Promise<void>
       stopAgent: () => Promise<void>
+      compactChat: (request: CompactRequest) => Promise<CompactResult>
       agentModels: (provider: AgentProviderId) => Promise<AgentModelOption[]>
       agentSkills: () => Promise<AgentSkill[]>
       agentStatus: (provider: AgentProviderId) => Promise<AgentProviderStatus>
       agentSignIn: (provider: AgentProviderId, reconnect?: boolean) => Promise<void>
       agentTest: (provider: AgentProviderId) => Promise<AgentTestResult>
       pathForFile: (file: File) => string
-      listChats: (documentPath?: string | null) => Promise<ChatSummary[]>
+      listChats: (documentPath?: string | null, tabId?: string) => Promise<ChatSummary[]>
       getChat: (id: string) => Promise<ChatRecord | null>
       saveChat: (record: ChatRecord) => Promise<void>
       deleteChat: (id: string) => Promise<void>
@@ -45,7 +55,7 @@ declare global {
 
 export type DocumentState =
   | { status: 'loading' }
-  | { status: 'ready'; document: Document; path: string | null; assetBase: string }
+  | { status: 'ready'; opened: OpenedDocument[]; activeTabId: string | null }
   | { status: 'failed'; error: string }
 
 export function useInitialDocument(): DocumentState {
@@ -59,9 +69,7 @@ export function useInitialDocument(): DocumentState {
         return
       }
       setState(
-        result.ok
-          ? { status: 'ready', document: result.document, path: result.path, assetBase: result.assetBase }
-          : { status: 'failed', error: result.error }
+        result.ok ? { status: 'ready', opened: result.tabs, activeTabId: result.activeTabId } : { status: 'failed', error: result.error }
       )
     })
 

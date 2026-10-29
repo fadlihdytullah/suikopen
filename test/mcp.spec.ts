@@ -1,3 +1,4 @@
+import { createPresence } from '../src/renderer/agent/presence'
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -34,7 +35,7 @@ function harness() {
   const store = createDocumentStore(fixture())
   const selection = createSelectionStore()
   const queue = createMutationQueue(store)
-  const handle = createAgentHandlers({ store, selection, queue, documentPath: () => '/tmp/doc.spen' })
+  const handle = createAgentHandlers({ store, selection, queue, presence: createPresence(), documentPath: () => '/tmp/doc.spen' })
 
   const call = (method: string, params: Record<string, unknown> = {}) =>
     handle({ id: method, method, params })

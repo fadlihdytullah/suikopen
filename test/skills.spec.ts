@@ -11,3 +11,13 @@ describe('parseSkill', () => {
     expect(parseSkill('# Only body', 'folder')).toMatchObject({ name: 'folder', description: '', body: '# Only body' })
   })
 })
+
+describe('built-in skills', () => {
+  it('lists design-handoff first and includes its instructions', async () => {
+    const { listSkills, skillInstructions } = await import('../src/main/agent/skills')
+    const skills = await listSkills()
+    expect(skills[0]).toMatchObject({ name: 'design-handoff', builtIn: true })
+    expect(skills.filter((skill) => skill.name === 'design-handoff')).toHaveLength(1)
+    expect(await skillInstructions(['design-handoff'])).toContain('<skill name="design-handoff">')
+  })
+})

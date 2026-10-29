@@ -22,6 +22,13 @@ describe('parseDocument', () => {
     expect(frame && hasChildren(frame) ? frame.children.map((child) => child.id) : []).toEqual(['r1', 'e1', 't1'])
   })
 
+  it('rejects numbers past the rendering limits', () => {
+    expect(() => parseDocument(withFixture((doc) => (doc['children'][0]['width'] = 1e9)))).toThrow(DocumentParseError)
+    expect(() =>
+      parseDocument(withFixture((doc) => (doc['children'][0]['effect'] = { type: 'blur', radius: 1e6 })))
+    ).toThrow(DocumentParseError)
+  })
+
   it('rejects a document with no version', () => {
     expect(() => parseDocument(withFixture((doc) => delete doc['version']))).toThrow(/no version field/)
   })

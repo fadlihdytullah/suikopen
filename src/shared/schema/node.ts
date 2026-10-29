@@ -8,6 +8,8 @@ export const VariableRef = z.string().regex(/^\$[A-Za-z0-9_-]+$/, { message: 'Ex
 
 export const ColorValue = z.union([HexColor, VariableRef])
 
+export const LIMITS = { size: 100_000, fontSize: 2_000, blur: 500, strokeWidth: 1_000 } as const
+
 export const NumberValue = z.union([z.number(), VariableRef])
 
 export const SizingBehavior = z
@@ -16,7 +18,7 @@ export const SizingBehavior = z
     message: 'Expected fit_content, fill_container, or either with a fallback such as fit_content(100)',
   })
 
-export const Sizing = z.union([z.number().nonnegative(), SizingBehavior])
+export const Sizing = z.union([z.number().nonnegative().max(LIMITS.size), SizingBehavior])
 
 export const LayoutMode = z.enum(['none', 'vertical', 'horizontal'])
 export const JustifyContent = z.enum(['start', 'center', 'end', 'space_between', 'space_around'])
@@ -59,7 +61,7 @@ export const Fills = z.union([Fill, z.array(Fill)])
 
 export const Stroke = z.object({
   color: ColorValue,
-  width: z.number().nonnegative().optional(),
+  width: z.number().nonnegative().max(LIMITS.strokeWidth).optional(),
   align: z.enum(['inside', 'center', 'outside']).optional(),
   enabled: z.boolean().optional(),
 })
@@ -67,7 +69,7 @@ export const Stroke = z.object({
 export const BlurEffect = z.object({
   type: z.literal('blur'),
   enabled: z.boolean().optional(),
-  radius: z.number().nonnegative(),
+  radius: z.number().nonnegative().max(LIMITS.blur),
 })
 
 export const ShadowEffect = z.object({
@@ -75,7 +77,7 @@ export const ShadowEffect = z.object({
   enabled: z.boolean().optional(),
   shadowType: z.enum(['inner', 'outer']).optional(),
   offset: z.object({ x: z.number(), y: z.number() }).optional(),
-  blur: z.number().nonnegative().optional(),
+  blur: z.number().nonnegative().max(LIMITS.blur).optional(),
   color: ColorValue.optional(),
 })
 
@@ -114,7 +116,7 @@ export const TextNode = BaseNode.extend({
   type: z.literal('text'),
   content: z.string(),
   fontFamily: z.string().optional(),
-  fontSize: NumberValue.optional(),
+  fontSize: z.union([z.number().positive().max(LIMITS.fontSize), VariableRef]).optional(),
   fontWeight: z.number().int().min(100).max(900).optional(),
   fontStyle: z.enum(['normal', 'italic']).optional(),
   letterSpacing: z.number().optional(),

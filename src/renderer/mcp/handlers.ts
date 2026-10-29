@@ -2,11 +2,12 @@ import type { AgentRequest, NodeSummary } from '../../shared/mcp/contract'
 import { hasChildren, NodeSchema, toArray, type Node } from '../../shared/schema/node'
 import { allowedImageUrl, IMAGE_HOSTS } from '../../shared/image-hosts'
 import { VariableSchema, type Variable } from '../../shared/schema/document'
+import { MEMORY_KINDS, removeNotes, upsertNote, type MemoryKind } from '../../shared/schema/memory'
 import { itemById, nodeById, parentChain, sceneItems, type Rect, type SceneItem } from '../canvas/scene-index'
-import { resolvedDocument } from '../document/current'
-import { activeTheme, setActiveTheme } from '../document/resolved'
+import { resolved } from '../document/resolved'
+import type { ThemeSelection } from '../../shared/schema/document'
 import { detachInstance } from '../store/mutations'
-import { markAgentTouch } from '../agent/presence'
+import type { Presence } from '../agent/presence'
 import { currentViewport } from '../canvas/viewport-ref'
 import { loadCanvasKit } from '../canvas/canvaskit'
 import { renderNodePng } from '../canvas/paint'
@@ -116,16 +117,28 @@ export type HandlerContext = {
   store: DocumentStore
   selection: SelectionStore
   queue: MutationQueue
+  presence: Presence
   documentPath: () => string | null
+  theme?: { get: () => ThemeSelection; set: (next: ThemeSelection) => void }
+  visible?: () => boolean
 }
 
-export function createAgentHandlers({ store, selection, queue, documentPath }: HandlerContext) {
+const LOCAL_THEME = () => {
+  let selection: ThemeSelection = {}
+  return { get: () => selection, set: (next: ThemeSelection) => (selection = next) }
+}
+
+export function createAgentHandlers({ store, selection, queue, presence, documentPath, theme = LOCAL_THEME(), visible = () => true }: HandlerContext) {
+  function resolvedDoc() {
+    return resolved(store.getState(), theme.get()).document
+  }
+
   function items(): SceneItem[] {
-    return sceneItems(resolvedDocument(store))
+    return sceneItems(resolvedDoc())
   }
 
   function node(id: string): SceneItem {
-    const item = itemById(resolvedDocument(store), id)
+    const item = itemById(resolvedDoc(), id)
     if (!item) {
       throw new Error(`No node with id "${id}".`)
     }
@@ -170,17 +183,18 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
         .map((item) => summarise(item))
     },
     get_selection: () => [...selection.getState()].map((id) => summarise(node(id))),
-    get_theme: () => ({ axes: store.getState().themes ?? {}, active: activeTheme() }),
+    get_theme: () => ({ axes: store.getState().themes ?? {}, active: theme.get() }),
     render_node: async (params) => {
       const id = requireString(params, 'id')
       node(id)
       const canvasKit = await loadCanvasKit()
-      const png = renderNodePng(canvasKit, resolvedDocument(store), id)
+      const png = renderNodePng(canvasKit, resolvedDoc(), id)
       if (!png) {
         throw new Error(`Could not render "${id}".`)
       }
       return { png }
     },
+    get_memory: () => ({ notes: store.getState().memory ?? [] }),
     get_variables: () => {
       const { variables = {}, themes = {} } = store.getState()
       return { variables, themes, css: variablesCss(variables) }
@@ -201,6 +215,9 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
     get_problems: (params) => findProblems(items(), node(requireString(params, 'id')).node.id),
     get_screen_rect: (params) => {
       const item = node(requireString(params, 'id'))
+      if (!visible()) {
+        throw new Error('This tab is not on screen. Use screenshot with an id to render a node instead.')
+      }
       const { viewport, origin } = currentViewport()
       const topLeft = toScreen(viewport, { x: item.x, y: item.y })
 
@@ -263,8 +280,8 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
       if (typeof selectionValue !== 'object' || selectionValue === null) {
         throw new Error('Missing required object parameter "theme".')
       }
-      setActiveTheme(selectionValue as Record<string, string>)
-      return { active: activeTheme() }
+      theme.set(selectionValue as Record<string, string>)
+      return { active: theme.get() }
     },
     detach_instance: (params) => {
       const id = requireString(params, 'id')
@@ -275,6 +292,26 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
       }
       detachInstance(store, id, item.node)
       return { detached: id }
+    },
+    remember: (params) => {
+      const kind = params['kind']
+      if (kind !== undefined && !MEMORY_KINDS.includes(kind as MemoryKind)) {
+        throw new Error(`Invalid kind "${String(kind)}": use ${MEMORY_KINDS.join(', ')}.`)
+      }
+      const key = typeof params['key'] === 'string' && params['key'] ? params['key'] : undefined
+      let saved = null as ReturnType<typeof upsertNote>['note'] | null
+      store.setMemory((notes) => {
+        const result = upsertNote(notes, { key, kind: kind as MemoryKind | undefined, text: requireString(params, 'text'), by: 'agent' }, crypto.randomUUID().slice(0, 8), Date.now())
+        saved = result.note
+        return result.notes
+      })
+      return { remembered: saved, count: store.getState().memory?.length ?? 0 }
+    },
+    forget: (params) => {
+      const refs = ids(params)
+      const before = store.getState().memory?.length ?? 0
+      store.setMemory((notes) => removeNotes(notes, refs))
+      return { forgotten: before - (store.getState().memory?.length ?? 0) }
     },
     set_variables: (params) => {
       const input = params['variables']
@@ -386,7 +423,7 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
     const roots = new Set<string>()
     ops.forEach((op: Record<string, unknown>) => {
       const id = touchedId(String(op['tool']), op)
-      if (id && itemById(resolvedDocument(store), id)) {
+      if (id && itemById(resolvedDoc(), id)) {
         roots.add(parentChain(all, id).at(-1) ?? id)
         touched(String(op['tool']), op)
       }
@@ -415,11 +452,11 @@ export function createAgentHandlers({ store, selection, queue, documentPath }: H
   function touched(method: string, params: Record<string, unknown>): void {
     const id = touchedId(method, params)
 
-    if (!id || !itemById(resolvedDocument(store), id)) {
+    if (!id || !itemById(resolvedDoc(), id)) {
       return
     }
 
-    markAgentTouch(id, method === 'create_node' ? subtreeIds(id) : [])
+    presence.markTouch(id, method === 'create_node' ? subtreeIds(id) : [])
   }
 
   return async function handle(request: AgentRequest): Promise<unknown> {

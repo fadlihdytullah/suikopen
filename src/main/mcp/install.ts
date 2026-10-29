@@ -1,8 +1,12 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { MCP_PATH, MCP_PORT } from './server'
 import { mcpToken } from './token'
+import handoffSkill from '../agent/skill/design-handoff.md?raw'
+
+export const SKILL_NAME = 'design-handoff'
+const LEGACY_SKILLS = ['suikopen-implement']
 
 export const SERVER_KEY = 'suikopen'
 
@@ -143,11 +147,45 @@ export async function mcpStatus(client: McpClient, port = MCP_PORT, token?: stri
   }
 }
 
+export function skillPath(client: McpClient, home = homedir(), name = SKILL_NAME): string | null {
+  return client === 'gemini' ? null : join(home, client === 'claude' ? '.claude' : '.codex', 'skills', name, 'SKILL.md')
+}
+
+function ours(text: string | null): boolean {
+  return text !== null && text.includes('get_handoff')
+}
+
+export async function installSkill(client: McpClient, home = homedir()): Promise<boolean> {
+  for (const legacy of LEGACY_SKILLS) {
+    const old = skillPath(client, home, legacy)
+    if (old && ours(await readText(old).catch(() => null))) {
+      await rm(dirname(old), { recursive: true, force: true })
+    }
+  }
+  const path = skillPath(client, home)
+  const current = path ? await readText(path).catch(() => null) : null
+  if (!path || current === handoffSkill || (current !== null && !ours(current))) {
+    return false
+  }
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, handoffSkill, 'utf8')
+  return true
+}
+
 export async function installMcp(client: McpClient): Promise<InstallResult> {
   const token = await mcpToken()
+  await installSkill(client).catch(() => false)
   return client === 'claude'
     ? installIntoClaudeCode(claudeConfigPath(), MCP_PORT, token)
     : client === 'codex'
       ? installIntoCodex(codexConfigPath(), MCP_PORT, token)
       : installIntoGemini(geminiConfigPath(), MCP_PORT, token)
+}
+
+export async function refreshSkills(): Promise<void> {
+  for (const client of ['claude', 'codex'] as const) {
+    if ((await mcpStatus(client).catch(() => null))?.installed) {
+      await installSkill(client).catch(() => false)
+    }
+  }
 }

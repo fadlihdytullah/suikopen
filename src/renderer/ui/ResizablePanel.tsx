@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { setPanelInset } from './panel-state'
 
 export function ResizablePanel({
   side,
@@ -23,6 +24,12 @@ export function ResizablePanel({
   const [width, setWidth] = useState(() => clamp(Number(localStorage.getItem(storageKey)) || initial))
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const direction = side === 'left' ? 1 : -1
+
+  useEffect(() => {
+    setPanelInset(side, hidden ? 0 : width)
+  }, [side, width, hidden])
+
+  useEffect(() => () => setPanelInset(side, 0), [side])
 
   function commit(next: number): void {
     const value = clamp(next)

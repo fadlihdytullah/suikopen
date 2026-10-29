@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { AgentPanel } from './AgentPanel'
 import { Inspector } from './Inspector'
 import { LayersPanel } from './LayersPanel'
+import { MemoryPanel } from './MemoryPanel'
 import { ResizablePanel } from './ResizablePanel'
 import { showLeftTab, togglePanels, usePanels, type LeftTab } from './panel-state'
 import { toggleSettings } from './settings-state'
@@ -13,6 +14,7 @@ export function usePanelCommands(): void {
         if (command === 'toggle-panels') togglePanels()
         if (command === 'show-layers') showLeftTab('layers')
         if (command === 'show-agent') showLeftTab('agent')
+        if (command === 'show-memory') showLeftTab('memory')
         if (command === 'open-settings') toggleSettings()
       }),
     []
@@ -22,9 +24,10 @@ export function usePanelCommands(): void {
 const TABS: { id: LeftTab; label: string; icon: React.ReactNode }[] = [
   { id: 'layers', label: 'Layers', icon: <path d="M8 2.5 14 5.5 8 8.5 2 5.5zM2 8.25l6 3 6-3M2 11l6 3 6-3" /> },
   { id: 'agent', label: 'Agent', icon: <path d="M3 12.5V4.75A1.75 1.75 0 0 1 4.75 3h6.5A1.75 1.75 0 0 1 13 4.75v4.5A1.75 1.75 0 0 1 11.25 11H5.5z" /> },
+  { id: 'memory', label: 'Memory', icon: <path d="M4.5 2.5h7v11L8 11l-3.5 2.5z" /> },
 ]
 
-export function LeftPanel(): React.ReactElement {
+export function LeftPanel({ tabId }: { tabId: string }): React.ReactElement {
   const { leftTab, hidden } = usePanels()
 
   return (
@@ -50,22 +53,25 @@ export function LeftPanel(): React.ReactElement {
         ))}
       </nav>
       <div className="panel-body" id="left-body-layers" role="tabpanel" aria-labelledby="left-tab-layers" hidden={leftTab !== 'layers'}>
-        <LayersPanel />
+        <LayersPanel key={tabId} />
       </div>
       <div className="panel-body" id="left-body-agent" role="tabpanel" aria-labelledby="left-tab-agent" hidden={leftTab !== 'agent'}>
         <AgentPanel />
+      </div>
+      <div className="panel-body" id="left-body-memory" role="tabpanel" aria-labelledby="left-tab-memory" hidden={leftTab !== 'memory'}>
+        <MemoryPanel key={tabId} />
       </div>
     </ResizablePanel>
   )
 }
 
-export function RightPanel(): React.ReactElement {
+export function RightPanel({ tabId }: { tabId: string }): React.ReactElement {
   const { hidden } = usePanels()
 
   return (
     <ResizablePanel side="right" storageKey="suikopen.panel.right" min={280} max={480} initial={320} label="Properties" hidden={hidden}>
       <div className="panel-body">
-        <Inspector />
+        <Inspector key={tabId} />
       </div>
     </ResizablePanel>
   )

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { open, readFile, rename, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { importPen } from '../shared/pen-import'
@@ -31,12 +32,44 @@ export async function readDocument(path: string): Promise<Document> {
   return parseDocument(json)
 }
 
-export async function writeDocument(path: string, document: Document): Promise<void> {
-  const temporary = join(dirname(path), `.${Date.now()}.spen.tmp`)
+export type Checkpoint = { document: Document; path: string | null; assetBase: string | null; dirty: boolean }
+
+export function toCheckpoint(value: unknown): Checkpoint | null {
+  try {
+    const candidate = value as Partial<Checkpoint>
+    return {
+      document: parseDocument(candidate.document),
+      path: typeof candidate.path === 'string' ? candidate.path : null,
+      assetBase: typeof candidate.assetBase === 'string' ? candidate.assetBase : null,
+      dirty: candidate.dirty === true,
+    }
+  } catch {
+    return null
+  }
+}
+
+export async function readCheckpoint(path: string): Promise<Checkpoint | null> {
+  try {
+    return toCheckpoint(JSON.parse(await readFile(path, 'utf8')))
+  } catch {
+    return null
+  }
+}
+
+export function writeCheckpoint(path: string, checkpoint: Checkpoint): Promise<void> {
+  return writeFileAtomic(path, JSON.stringify(checkpoint))
+}
+
+export function writeDocument(path: string, document: Document): Promise<void> {
+  return writeFileAtomic(path, `${JSON.stringify(document, null, 2)}\n`)
+}
+
+export async function writeFileAtomic(path: string, text: string): Promise<void> {
+  const temporary = join(dirname(path), `.${randomUUID()}.tmp`)
   const handle = await open(temporary, 'w')
 
   try {
-    await handle.writeFile(`${JSON.stringify(document, null, 2)}\n`, 'utf8')
+    await handle.writeFile(text, 'utf8')
     await handle.sync()
   } finally {
     await handle.close()

@@ -3,7 +3,7 @@ import { DEFAULT_MODEL, type AgentModelOption, type AgentRunRequest } from '../.
 import { promptWithText, readBase64 } from './attachments'
 import { MCP_SERVER_NAME, TOOL_NAMES } from '../mcp/server'
 import { mcpToken } from '../mcp/token'
-import { childEnvironment, findExecutable, MCP_URL, runCommand, systemPrompt, workspace, type ProviderRun } from './process'
+import { childEnvironment, findExecutable, mcpUrl, runCommand, systemPrompt, workspace, type ProviderRun } from './process'
 
 const WEB_TOOLS = ['WebSearch']
 
@@ -86,8 +86,8 @@ export const runClaude: ProviderRun = async (request, signal, emit) => {
       tools: WEB_TOOLS,
       permissionMode: 'dontAsk',
       allowedTools: [...WEB_TOOLS, ...TOOL_NAMES.map((name) => `mcp__${MCP_SERVER_NAME}__${name}`)],
-      mcpServers: { [MCP_SERVER_NAME]: { type: 'http', url: MCP_URL, headers: { Authorization: `Bearer ${await mcpToken()}` } } },
-      systemPrompt: await systemPrompt(request.skills),
+      mcpServers: { [MCP_SERVER_NAME]: { type: 'http', url: mcpUrl(request.tab), headers: { Authorization: `Bearer ${await mcpToken()}` } } },
+      systemPrompt: await systemPrompt(request),
       includePartialMessages: true,
       ...(executable ? { pathToClaudeCodeExecutable: executable } : {}),
       ...(request.model === DEFAULT_MODEL ? {} : { model: request.model }),
@@ -99,6 +99,7 @@ export const runClaude: ProviderRun = async (request, signal, emit) => {
   let sessionId = request.sessionId
   let costUsd: number | null = null
   let error: string | null = null
+  let contextTokens: number | null = null
 
   for await (const message of run) {
     if ('session_id' in message && typeof message.session_id === 'string') {
@@ -114,6 +115,10 @@ export const runClaude: ProviderRun = async (request, signal, emit) => {
     }
 
     if (message.type === 'assistant') {
+      const usage = message.message.usage
+      if (usage) {
+        contextTokens = usage.input_tokens + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + usage.output_tokens
+      }
       for (const block of message.message.content) {
         if (block.type === 'tool_use') {
           emit({ kind: 'tool', name: block.name.replace(`mcp__${MCP_SERVER_NAME}__`, ''), input: block.input })
@@ -132,5 +137,5 @@ export const runClaude: ProviderRun = async (request, signal, emit) => {
     }
   }
 
-  return { sessionId, costUsd, error }
+  return { sessionId, costUsd, error, contextTokens }
 }

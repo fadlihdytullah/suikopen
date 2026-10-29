@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { HexColor, NodeSchema, type Node } from './node'
+import { MemorySchema, type MemoryNote } from './memory'
 
 export const DOCUMENT_VERSION = 1
 
@@ -21,6 +22,7 @@ export const DocumentSchema = z.object({
   themes: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).optional(),
   variables: z.record(z.string().min(1), VariableSchema).optional(),
   children: z.array(NodeSchema),
+  memory: MemorySchema.optional(),
 })
 
 export type ThemeSelection = Record<string, string>
@@ -30,6 +32,7 @@ export type Document = {
   themes?: Record<string, string[]>
   variables?: Record<string, Variable>
   children: Node[]
+  memory?: MemoryNote[]
 }
 
 export class DocumentParseError extends Error {

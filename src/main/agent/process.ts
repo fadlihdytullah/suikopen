@@ -8,8 +8,9 @@ import type { AgentEvent, AgentRunRequest } from '../../shared/agent'
 import { MCP_PATH, MCP_PORT } from '../mcp/server'
 import { DESIGNER_PROMPT } from './prompt'
 import { skillInstructions } from './skills'
+import { memoryBlock, MemorySchema } from '../../shared/schema/memory'
 
-export type RunResult = { sessionId: string | null; costUsd: number | null; error: string | null }
+export type RunResult = { sessionId: string | null; costUsd: number | null; error: string | null; contextTokens?: number | null }
 
 const AUTH_ERROR = /\b401\b|unauthori[sz]ed|not (logged|signed) in|log ?in again|sign ?in again|token (has )?expired|refresh token|invalid_grant|authentication/i
 
@@ -63,7 +64,32 @@ export async function workspace(name: string): Promise<string> {
   return directory
 }
 
-export async function systemPrompt(skills: string[]): Promise<string> {
-  const text = skills.length ? await skillInstructions(skills) : ''
-  return text ? `${DESIGNER_PROMPT}\n\nThe user attached these skills. Follow them where they apply to this request:\n\n${text}` : DESIGNER_PROMPT
+export function mcpUrl(tab?: { id: string }): string {
+  return tab ? `${MCP_URL}?tab=${encodeURIComponent(tab.id)}` : MCP_URL
+}
+
+function tabNote(tab?: { id: string; name: string }): string {
+  return tab
+    ? `\n\nYou are editing "${tab.name}" (tab ${tab.id}). Every suikopen tool works on this tab unless you pass another tabId. Call list_tabs to see the other open files.`
+    : ''
+}
+
+export const HANDOFF_LIMIT = 6_000
+
+function handoffNote(handoff?: string): string {
+  return handoff
+    ? `\n\nThis chat was compacted. Summary of the earlier conversation, written by you:\n<handoff>\n${handoff.slice(0, HANDOFF_LIMIT).replaceAll('</handoff>', '')}\n</handoff>`
+    : ''
+}
+
+export function contextNotes(request: Pick<AgentRunRequest, 'memory' | 'handoff'>): string {
+  const parsed = MemorySchema.safeParse(request.memory ?? [])
+  const block = parsed.success ? memoryBlock(parsed.data) : ''
+  return `${block ? `\n\n${block}` : ''}${handoffNote(request.handoff)}`
+}
+
+export async function systemPrompt(request: Pick<AgentRunRequest, 'skills' | 'tab' | 'memory' | 'handoff'>): Promise<string> {
+  const text = request.skills.length ? await skillInstructions(request.skills) : ''
+  const base = `${DESIGNER_PROMPT}${tabNote(request.tab)}${contextNotes(request)}`
+  return text ? `${base}\n\nThe user attached these skills. Follow them where they apply to this request:\n\n${text}` : base
 }

@@ -8,7 +8,7 @@ import { createInterface } from 'node:readline'
 import { DEFAULT_MODEL } from '../../shared/agent'
 import { MCP_SERVER_NAME } from '../mcp/server'
 import { mcpToken } from '../mcp/token'
-import { childEnvironment, cleanError, findExecutable, MCP_URL, systemPrompt, workspace, type ProviderRun } from './process'
+import { childEnvironment, cleanError, findExecutable, mcpUrl, systemPrompt, workspace, type ProviderRun } from './process'
 
 export const GEMINI_CORE_TOOLS = ['google_web_search', 'read_file', 'read_many_files']
 const BLOCKED_TOOLS = ['run_shell_command', 'write_file', 'replace', 'web_fetch', 'save_memory']
@@ -24,6 +24,7 @@ type StreamEvent = {
   message?: string
   status?: string
   error?: { message?: string }
+  stats?: { input_tokens?: number; output_tokens?: number; total_tokens?: number }
 }
 
 export function geminiAccount(): { signedIn: boolean; account?: string } {
@@ -50,7 +51,7 @@ export const runGemini: ProviderRun = async (request, signal, emit) => {
   await mkdir(join(cwd, '.gemini'), { recursive: true })
   await writeFile(
     join(cwd, '.gemini/settings.json'),
-    JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: { httpUrl: MCP_URL, headers: { Authorization: `Bearer ${await mcpToken()}` }, trust: true } }, tools: { core: GEMINI_CORE_TOOLS, exclude: BLOCKED_TOOLS } }, null, 2)
+    JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: { httpUrl: mcpUrl(request.tab), headers: { Authorization: `Bearer ${await mcpToken()}` }, trust: true } }, tools: { core: GEMINI_CORE_TOOLS, exclude: BLOCKED_TOOLS } }, null, 2)
   )
   const attachmentDir = join(cwd, 'attachments')
   await rm(attachmentDir, { recursive: true, force: true })
@@ -63,7 +64,7 @@ export const runGemini: ProviderRun = async (request, signal, emit) => {
   }
   const prompt = await promptWithText(request.prompt, request.attachments)
   const promptPath = join(cwd, 'system.md')
-  await writeFile(promptPath, await systemPrompt(request.skills))
+  await writeFile(promptPath, await systemPrompt(request))
 
   const args = [
     '--output-format',
@@ -93,6 +94,7 @@ export const runGemini: ProviderRun = async (request, signal, emit) => {
   let sessionId = request.sessionId
   let error: string | null = null
   let finished = false
+  let contextTokens: number | null = null
 
   for await (const line of createInterface({ input: child.stdout })) {
     let event: StreamEvent
@@ -111,6 +113,7 @@ export const runGemini: ProviderRun = async (request, signal, emit) => {
       error = cleanError(event.message ?? 'Gemini CLI reported an error.')
     } else if (event.type === 'result') {
       finished = true
+      contextTokens = event.stats?.total_tokens ?? ((event.stats?.input_tokens ?? 0) + (event.stats?.output_tokens ?? 0) || null)
       if (event.status !== 'success') {
         error = event.error?.message ? cleanError(event.error.message) : (error ?? 'Gemini CLI stopped.')
       }
@@ -122,5 +125,5 @@ export const runGemini: ProviderRun = async (request, signal, emit) => {
   if (!finished && !signal.aborted && code !== 0) {
     error ??= stderr.trim().split('\n').pop() || `Gemini CLI exited with code ${code}.`
   }
-  return { sessionId, costUsd: null, error }
+  return { sessionId, costUsd: null, error, contextTokens }
 }

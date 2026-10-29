@@ -45,3 +45,16 @@ describe('chat history', () => {
     expect(relativeTime(now - 86_400_000, now)).toBe('Yesterday')
   })
 })
+
+describe('chats per untitled tab', () => {
+  it('keeps untitled chats apart per tab and saved files per path', async () => {
+    const { listChats, saveChat } = await import('../src/main/agent/chats')
+    const base = { provider: 'claude' as const, model: 'default', sessionId: null, createdAt: 1, entries: [] }
+    await saveChat({ ...base, id: 'u-a', title: 'A', documentPath: null, tabId: 'tab-a', updatedAt: 1 })
+    await saveChat({ ...base, id: 'u-b', title: 'B', documentPath: null, tabId: 'tab-b', updatedAt: 2 })
+    await saveChat({ ...base, id: 'p-1', title: 'P', documentPath: '/x/talangin.spen', tabId: 'tab-a', updatedAt: 3 })
+    expect((await listChats(null, 'tab-a')).map((chat) => chat.id)).toEqual(['u-a'])
+    expect((await listChats(null, 'tab-b')).map((chat) => chat.id)).toEqual(['u-b'])
+    expect((await listChats('/x/talangin.spen', 'tab-z')).map((chat) => chat.id)).toEqual(['p-1'])
+  })
+})

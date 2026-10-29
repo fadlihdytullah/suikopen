@@ -1,14 +1,24 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, net } from 'electron'
-import { readDocument, writeDocument } from './file-io'
+import { readDocument, toCheckpoint, writeDocument, type Checkpoint } from './file-io'
+import { createHistoryVault, createRecovery } from './recovery'
 import type { Document } from '../shared/schema/document'
 import { readFont, type FontRequest } from './fonts'
+import { tabs } from './tabs'
+import { setWindowTabs } from './menu'
 import { allowedImageUrl } from '../shared/image-hosts'
 
-export type OpenResult =
-  | { ok: true; document: Document; path: string | null; assetBase: string }
-  | { ok: false; error: string }
+export type OpenedDocument = {
+  ok: true
+  existing?: false
+  tabId: string
+  document: Document
+  path: string | null
+  assetBase: string | null
+  recovered?: boolean
+}
+export type OpenResult = OpenedDocument | { ok: true; existing: true; tabId: string } | { ok: false; error: string }
 export type SaveResult = { ok: true; path: string } | { ok: false; error: string } | { cancelled: true }
 export type DiscardChoice = 'save' | 'discard' | 'cancel'
 
@@ -32,6 +42,10 @@ const trustedPaths = new Set<string>()
 let pendingPath: string | null = null
 
 async function openPath(path: string): Promise<OpenResult> {
+  const openTab = tabs.idForPath(path)
+  if (openTab) {
+    return { ok: true, existing: true, tabId: openTab }
+  }
   try {
     const document = await readDocument(path)
     const imported = path.toLowerCase().endsWith('.pen')
@@ -39,10 +53,86 @@ async function openPath(path: string): Promise<OpenResult> {
       trustedPaths.add(path)
       app.addRecentDocument(path)
     }
-    return { ok: true, document, path: imported ? null : path, assetBase: path }
+    const kept = imported ? null : path
+    return { ok: true, tabId: tabs.open(kept).id, document, path: kept, assetBase: path }
   } catch (error) {
     return { ok: false, error: (error as Error).message }
   }
+}
+
+let stores: { recovery: ReturnType<typeof createRecovery>; history: ReturnType<typeof createHistoryVault> } | null = null
+
+function persisted() {
+  stores ??= {
+    recovery: createRecovery(join(app.getPath('userData'), 'recovery')),
+    history: createHistoryVault(join(app.getPath('userData'), 'history')),
+  }
+  return stores
+}
+
+export type InitialResult = { ok: true; tabs: OpenedDocument[]; activeTabId: string | null } | { ok: false; error: string }
+
+export function endSession(): void {
+  void persisted().recovery.clearCheckpoints()
+}
+
+async function askRestore(): Promise<boolean> {
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    buttons: ['Restore', 'Discard'],
+    defaultId: 0,
+    cancelId: 1,
+    message: 'SuikoPen quit unexpectedly.',
+    detail: 'Restore the unsaved changes in your open tabs?',
+  })
+  return response === 0
+}
+
+async function restoreSession(): Promise<{ tabs: OpenedDocument[]; activeTabId: string | null }> {
+  const fromMemory = persisted().recovery.hasMemory()
+  const { session, checkpoints } = fromMemory ? persisted().recovery.memory() : await persisted().recovery.read()
+  persisted().recovery.reset()
+  if (!session) {
+    return { tabs: [], activeTabId: null }
+  }
+
+  const dirty = session.order.some((id) => checkpoints.get(id)?.dirty)
+  const useCheckpoints = !dirty || fromMemory || (await askRestore())
+  if (!useCheckpoints) {
+    await persisted().recovery.clearCheckpoints()
+  }
+
+  const opened: OpenedDocument[] = []
+  let activeTabId: string | null = null
+  for (const oldId of session.order) {
+    const saved = useCheckpoints ? checkpoints.get(oldId) : undefined
+    const path = saved ? saved.path : (session.paths[oldId] ?? null)
+    let entry: OpenedDocument | null = null
+
+    if (saved?.dirty) {
+      entry = { ok: true, tabId: '', document: saved.document, path: saved.path, assetBase: saved.assetBase, recovered: true }
+    } else if (path) {
+      try {
+        entry = { ok: true, tabId: '', document: await readDocument(path), path, assetBase: path }
+      } catch {
+        entry = null
+      }
+    }
+
+    if (!entry || (entry.path && tabs.idForPath(entry.path))) {
+      continue
+    }
+    if (entry.path) {
+      trustedPaths.add(entry.path)
+    }
+    entry.tabId = tabs.open(entry.path).id
+    opened.push(entry)
+    if (oldId === session.activeId) {
+      activeTabId = entry.tabId
+    }
+  }
+
+  return { tabs: opened, activeTabId: activeTabId ?? opened[0]?.tabId ?? null }
 }
 
 export async function openFileInWindow(path: string): Promise<boolean> {
@@ -57,15 +147,31 @@ export async function openFileInWindow(path: string): Promise<boolean> {
 }
 
 export function registerDocumentHandlers(): void {
-  ipcMain.handle('document:open-initial', async (): Promise<OpenResult> => {
+  ipcMain.handle('document:open-initial', async (): Promise<InitialResult> => {
+    tabs.clear()
+    await persisted().history.clear()
+    const restored = await restoreSession()
+
     if (pendingPath) {
       const path = pendingPath
       pendingPath = null
-      return openPath(path)
+      const result = await openPath(path)
+      if (result.ok && !result.existing) {
+        restored.tabs.push(result)
+        restored.activeTabId = result.tabId
+      } else if (result.ok) {
+        restored.activeTabId = result.tabId
+      }
     }
+
+    if (restored.tabs.length > 0) {
+      return { ok: true, ...restored }
+    }
+
     try {
       const source = initialDocumentPath()
-      return { ok: true, document: await readDocument(source), path: null, assetBase: source }
+      const tabId = tabs.open(null).id
+      return { ok: true, tabs: [{ ok: true, tabId, document: await readDocument(source), path: null, assetBase: source }], activeTabId: tabId }
     } catch (error) {
       return { ok: false, error: (error as Error).message }
     }
@@ -87,7 +193,7 @@ export function registerDocumentHandlers(): void {
 
   ipcMain.handle(
     'document:save',
-    async (_event, request: { path: string | null; document: Document; saveAs?: boolean }): Promise<SaveResult> => {
+    async (_event, request: { tabId?: string; path: string | null; document: Document; saveAs?: boolean }): Promise<SaveResult> => {
       const trusted = request.path !== null && trustedPaths.has(request.path)
       const path = request.saveAs || !trusted ? await pickSavePath(request.path) : request.path
 
@@ -99,12 +205,47 @@ export function registerDocumentHandlers(): void {
         await writeDocument(path, request.document)
         trustedPaths.add(path)
         app.addRecentDocument(path)
+        if (request.tabId) {
+          tabs.rename(request.tabId, path)
+        }
         return { ok: true, path }
       } catch (error) {
         return { ok: false, error: (error as Error).message }
       }
     }
   )
+
+  ipcMain.handle('tabs:new', () => tabs.open(null).id)
+  ipcMain.on('tabs:closed', (_event, id: string) => {
+    tabs.close(id)
+    void persisted().recovery.remove(id)
+    void persisted().history.take(id)
+  })
+  ipcMain.handle('tabs:spill-history', (_event, id: string, json: string) => persisted().history.spill(id, json))
+  ipcMain.handle('tabs:take-history', (_event, id: string) => persisted().history.take(id))
+  ipcMain.on('tabs:sync', (event, list: { id: string; name: string; active: boolean }[]) => {
+    if (!BrowserWindow.fromWebContents(event.sender)) {
+      return
+    }
+    setWindowTabs(list)
+    const paths = Object.fromEntries(tabs.list().map((entry) => [entry.id, entry.path]))
+    void persisted().recovery.writeSession({
+      order: list.map((entry) => entry.id).filter((id) => id in paths),
+      activeId: list.find((entry) => entry.active)?.id ?? null,
+      paths,
+    })
+  })
+
+  ipcMain.on('document:checkpoint', (_event, state: Checkpoint & { tabId: string }) => {
+    if (!tabs.has(state.tabId)) {
+      return
+    }
+    const document = toCheckpoint(state)
+    if (!document) {
+      return
+    }
+    void persisted().recovery.write(state.tabId, { ...document, path: document.path !== null && trustedPaths.has(document.path) ? document.path : null })
+  })
 
   ipcMain.handle('window:set-state', (event, state: { path: string | null; edited: boolean }) => {
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -114,19 +255,30 @@ export function registerDocumentHandlers(): void {
 
     window.setTitle(state.path ? basename(state.path) : 'Untitled')
     window.setDocumentEdited(state.edited)
-    if (state.path) {
-      window.setRepresentedFilename(state.path)
-    }
+    window.setRepresentedFilename(state.path ?? '')
   })
 
-  ipcMain.handle('app:confirm-discard', async (event): Promise<DiscardChoice> => {
+  ipcMain.handle('app:confirm-stop-agent', async (event, name: string): Promise<boolean> => {
     const window = BrowserWindow.fromWebContents(event.sender)
     const options = {
       type: 'warning' as const,
-      buttons: ['Save', 'Discard', 'Cancel'],
+      buttons: ['Stop and Close', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: `The agent is still working in "${name}". Stop it and close?`,
+    }
+    const result = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options)
+    return result.response === 0
+  })
+
+  ipcMain.handle('app:confirm-discard', async (event, name?: string): Promise<DiscardChoice> => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      type: 'warning' as const,
+      buttons: ['Save', "Don't Save", 'Cancel'],
       defaultId: 0,
       cancelId: 2,
-      message: 'This document has unsaved changes.',
+      message: name ? `Save changes to "${name}"?` : 'This document has unsaved changes.',
     }
 
     const result = window

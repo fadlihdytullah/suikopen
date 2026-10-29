@@ -2,6 +2,7 @@ import type { DocumentStore } from '../store/document-store'
 import type { SelectionStore } from '../store/selection'
 import { insertNode, newId, removeNodes, updateNodes, type NodePatch } from '../store/mutations'
 import { hitTest, itemsWithin } from '../canvas/hit-test'
+import { labelAt, labelsOf } from '../canvas/labels'
 import { contains, nodeById, sceneItems, unionBounds, type Rect, type SceneItem } from '../canvas/scene-index'
 import { requestZoom } from '../canvas/viewport-ref'
 import { canvasIsDark } from '../canvas/canvas-theme'
@@ -196,7 +197,10 @@ export function createPointerController({
       return
     }
 
-    const hit = hitTest(items(), point)
+    const box = canvas.getBoundingClientRect()
+    const hit =
+      labelAt(labelsOf(resolvedDocument(store), store.getState()), getViewport(), { x: event.clientX - box.left, y: event.clientY - box.top }) ??
+      hitTest(items(), point)
 
     if (!hit) {
       if (!event.shiftKey) {

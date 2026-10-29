@@ -1,19 +1,63 @@
 import type { CanvasKit, Image } from 'canvaskit-wasm'
 
 const SVG_RASTER_SIZE = 512
+export const IMAGE_BUDGET_BYTES = 256 * 1024 * 1024
 
-type Entry = { image: Image | null; pending: boolean }
+type Entry = { image: Image | null; pending: boolean; bytes: number }
 
-const cache = new Map<string, Entry>()
+export function createLru<T extends { bytes: number }>(budget: number, dispose: (entry: T) => void) {
+  const entries = new Map<string, T>()
+  let total = 0
+
+  return {
+    get(key: string): T | undefined {
+      const entry = entries.get(key)
+      if (entry) {
+        entries.delete(key)
+        entries.set(key, entry)
+      }
+      return entry
+    },
+    set(key: string, entry: T): void {
+      entries.set(key, entry)
+    },
+    grow(key: string, bytes: number): void {
+      const entry = entries.get(key)
+      if (!entry) {
+        return
+      }
+      total += bytes - entry.bytes
+      entry.bytes = bytes
+      for (const [other, value] of entries) {
+        if (total <= budget) {
+          break
+        }
+        if (other === key || value.bytes === 0) {
+          continue
+        }
+        entries.delete(other)
+        total -= value.bytes
+        dispose(value)
+      }
+    },
+    total: (): number => total,
+    keys: (): string[] => [...entries.keys()],
+  }
+}
+
+const cache = createLru<Entry>(IMAGE_BUDGET_BYTES, (entry) => {
+  entry.image?.delete()
+  entry.image = null
+})
 let base: string | null = null
 let onLoaded: () => void = () => {}
 
 export function setAssetBase(path: string | null): void {
   base = path
-  for (const entry of cache.values()) {
-    entry.image?.delete()
-  }
-  cache.clear()
+}
+
+export function imageKey(assetBase: string | null, url: string): string {
+  return /^(https?:|data:)/i.test(url) ? url : `${assetBase ?? ''}|${url}`
 }
 
 export function onImageLoaded(callback: () => void): void {
@@ -49,13 +93,14 @@ async function rasterizeSvg(bytes: ArrayBuffer): Promise<Uint8Array | null> {
 }
 
 export function getImage(canvasKit: CanvasKit, url: string): Image | null {
-  const cached = cache.get(url)
+  const key = imageKey(base, url)
+  const cached = cache.get(key)
   if (cached) {
     return cached.image
   }
 
-  const entry: Entry = { image: null, pending: true }
-  cache.set(url, entry)
+  const entry: Entry = { image: null, pending: true, bytes: 0 }
+  cache.set(key, entry)
 
   window.suikopen
     .readAsset({ base, url })
@@ -69,6 +114,9 @@ export function getImage(canvasKit: CanvasKit, url: string): Image | null {
         return
       }
       entry.image = canvasKit.MakeImageFromEncoded(encoded)
+      if (entry.image) {
+        cache.grow(key, entry.image.width() * entry.image.height() * 4)
+      }
       onLoaded()
     })
     .catch(() => {

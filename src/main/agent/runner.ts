@@ -11,11 +11,14 @@ import {
   type AgentProviderStatus,
   type AgentRunRequest,
   type AgentTestResult,
+  type CompactRequest,
+  type CompactResult,
   DEFAULT_MODEL,
 } from '../../shared/agent'
 import { claudeAccount, listClaudeModels, runClaude } from './claude'
 import { codexAccount, listCodexModels, runCodex } from './codex'
 import { geminiAccount, runGemini } from './gemini'
+import { compactPrompt, parseCompaction } from './compact'
 import { commandVersion, findExecutable, needsSignIn, type ProviderRun } from './process'
 
 const TEST_TIMEOUT_MS = 60_000
@@ -115,5 +118,31 @@ export async function runAgent(request: AgentRunRequest, emit: (event: AgentEven
     active = null
     const error = controller.signal.aborted ? 'Stopped.' : result.error
     emit({ kind: 'done', ...result, error, ...(error && needsSignIn(error) ? { signIn: true } : {}) })
+  }
+}
+
+export async function compactChat(request: CompactRequest): Promise<CompactResult> {
+  if (active) {
+    return { ok: false, error: 'The agent is already working.' }
+  }
+  const controller = new AbortController()
+  active = controller
+  let reply = ''
+  try {
+    const result = await RUNS[request.provider](
+      { provider: request.provider, prompt: compactPrompt(request), attachments: [], sessionId: request.sessionId, model: request.model, effort: null, skills: [], ...(request.tab ? { tab: request.tab } : {}) },
+      controller.signal,
+      (event) => {
+        if (event.kind === 'text') reply += event.text
+      }
+    )
+    if (controller.signal.aborted) {
+      return { ok: false, error: 'Stopped.' }
+    }
+    return result.error && !reply ? { ok: false, error: result.error } : parseCompaction(reply)
+  } catch (caught) {
+    return { ok: false, error: (caught as Error).message }
+  } finally {
+    active = null
   }
 }

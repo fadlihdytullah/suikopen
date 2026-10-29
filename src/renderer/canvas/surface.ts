@@ -34,7 +34,7 @@ export function wrapSurface(surface: Surface, cssWidth: number, cssHeight: numbe
         return
       }
       disposed = true
-      surface.delete()
+      surface.dispose()
     },
   }
 }

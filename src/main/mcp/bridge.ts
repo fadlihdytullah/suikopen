@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow, ipcMain } from 'electron'
-import type { AgentResponse } from '../../shared/mcp/contract'
+import type { AgentResponse, TabRef } from '../../shared/mcp/contract'
 
 export const CALL_TIMEOUT_MS = 15_000
 
-type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
+type Pending = { resolve: (value: { value: unknown; tab?: TabRef }) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
 
 const pending = new Map<string, Pending>()
 
@@ -19,14 +19,18 @@ export function registerBridge(): void {
     pending.delete(response.id)
 
     if (response.ok) {
-      waiting.resolve(response.value)
+      waiting.resolve({ value: response.value, tab: response.tab })
     } else {
       waiting.reject(new Error(response.error))
     }
   })
 }
 
-export function callEditor(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+export function callEditor(method: string, params: Record<string, unknown> = {}, tabId?: string): Promise<unknown> {
+  return callEditorTab(method, params, tabId).then((reply) => reply.value)
+}
+
+export function callEditorTab(method: string, params: Record<string, unknown> = {}, tabId?: string): Promise<{ value: unknown; tab?: TabRef }> {
   const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
 
   if (!window || window.isDestroyed()) {
@@ -42,7 +46,7 @@ export function callEditor(method: string, params: Record<string, unknown> = {})
     }, CALL_TIMEOUT_MS)
 
     pending.set(id, { resolve, reject, timer })
-    window.webContents.send('agent:call', { id, method, params })
+    window.webContents.send('agent:call', { id, method, params, ...(tabId ? { tabId } : {}) })
   })
 }
 

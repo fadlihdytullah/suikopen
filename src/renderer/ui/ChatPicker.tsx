@@ -20,6 +20,7 @@ export function ChatPicker({
   title,
   currentId,
   documentPath,
+  tabId,
   disabled,
   onOpen,
   onDelete,
@@ -27,6 +28,7 @@ export function ChatPicker({
   title: string
   currentId: string | null
   documentPath: string | null
+  tabId?: string
   disabled: boolean
   onOpen: (id: string) => void
   onDelete: () => void
@@ -44,8 +46,8 @@ export function ChatPicker({
     if (!popover.open) return
     setQuery('')
     inputRef.current?.focus()
-    void window.suikopen.listChats(scope === 'document' ? documentPath : undefined).then(setChats)
-  }, [popover.open, scope, documentPath])
+    void window.suikopen.listChats(scope === 'document' ? documentPath : undefined, tabId).then(setChats)
+  }, [popover.open, scope, documentPath, tabId])
 
   useEffect(() => {
     document.getElementById(`${popover.id}-${list.active}`)?.scrollIntoView({ block: 'nearest' })

@@ -6,4 +6,6 @@ if (!container) {
   throw new Error('Missing #root')
 }
 
+document.documentElement.classList.toggle('mac', window.suikopen.platform === 'darwin')
+
 createRoot(container).render(<App />)

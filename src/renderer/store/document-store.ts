@@ -1,5 +1,6 @@
 import { applyPatches, enablePatches, produceWithPatches, type Draft } from 'immer'
 import type { Document } from '../../shared/schema/document'
+import type { MemoryNote } from '../../shared/schema/memory'
 import { createHistory, type History } from './history'
 
 enablePatches()
@@ -18,6 +19,7 @@ export type DocumentStore = {
   canUndo: () => boolean
   canRedo: () => boolean
   onGestureEnd: (listener: Listener) => () => void
+  setMemory: (update: (notes: MemoryNote[]) => MemoryNote[]) => void
   history: History
 }
 
@@ -83,6 +85,18 @@ export function createDocumentStore(initial: Document): DocumentStore {
       gestureListeners.add(listener)
       return () => gestureListeners.delete(listener)
     },
+    setMemory: (update) => {
+      const memory = update([...(current.memory ?? [])])
+      set(memory.length ? { ...current, memory } : withoutMemory(current))
+    },
     history,
   }
+}
+
+function withoutMemory(document: Document): Document {
+  if (!document.memory) {
+    return document
+  }
+  const { memory: _memory, ...rest } = document
+  return rest
 }

@@ -7,6 +7,8 @@ import {
   ATTACHMENT_HINT,
   FALLBACK_MODELS,
   PROVIDERS,
+  shouldCompact,
+  layersBlock,
   type ChatEntry,
   type AgentEffort,
   type AgentModelOption,
@@ -15,14 +17,18 @@ import {
   type AgentSkill,
 } from '../../shared/agent'
 import { requestFit } from '../canvas/viewport-ref'
-import { setAgentWorking } from '../agent/presence'
 import { ModelPicker } from './ModelPicker'
 import { usePopover } from './Popover'
 import { SkillPicker } from './SkillPicker'
 import { attachmentError, AttachmentChips, DropOverlay, isLongPaste, SentAttachments, sendableAttachments, useAttachments, useFileDrop } from './Attachments'
 import { openSettings, refreshStatuses, setProvider, useSettings } from './settings-state'
 import { ChatPicker } from './ChatPicker'
-import { useDocumentPath } from '../document/current-path'
+import { showLeftTab } from './panel-state'
+import { LayerChip, layersKey, useSelectedLayers } from './LayerRefs'
+import { touchedIds } from '../../shared/handoff'
+import { handoffFor } from '../agent/handoff'
+import { MEMORY_KINDS, upsertNote, type MemoryKind } from '../../shared/schema/memory'
+import { tabLabels, tabs, useActiveTab } from '../tabs/tabs-store'
 
 type Entry = ChatEntry
 
@@ -115,6 +121,48 @@ function ToolGroup({ names }: { names: string[] }): React.ReactElement {
   )
 }
 
+function sinceCompaction(entries: readonly ChatEntry[]): ChatEntry[] {
+  let last = entries.length - 1
+  while (last >= 0 && entries[last]!.kind !== 'compacted') last -= 1
+  return entries.slice(last + 1)
+}
+
+function transcriptOf(entries: readonly ChatEntry[], handoff: string | null): string {
+  const lines = sinceCompaction(entries).flatMap((entry) => {
+    if (entry.kind === 'user') return [`User: ${entry.text}`]
+    if (entry.kind === 'assistant') return [`Agent: ${entry.text}`]
+    if (entry.kind === 'tools') return [`(tools: ${entry.names.join(', ')})`]
+    if (entry.kind === 'memory') return [`(remembered: ${entry.text})`]
+    return []
+  })
+  return [handoff ? `Earlier summary: ${handoff}` : '', ...lines].filter(Boolean).join('\n\n')
+}
+
+function CopyReply({ text }: { text: string }): React.ReactElement {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="agent-reply-actions">
+      <button
+        type="button"
+        className="icon-button"
+        aria-label={copied ? 'Copied' : 'Copy response'}
+        title={copied ? 'Copied' : 'Copy response'}
+        onClick={() => {
+          void navigator.clipboard.writeText(text.trim()).then(() => {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 1500)
+          })
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          {copied ? <path d="M3 7.5 6 10.5l5-6" /> : <path d="M5 4.5V3a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H9.5M3 5h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" />}
+        </svg>
+      </button>
+      <span className="sr-only" aria-live="polite">{copied ? 'Response copied' : ''}</span>
+    </div>
+  )
+}
+
 export function AgentPanel(): React.ReactElement {
   const [entries, setEntries] = useState<Entry[]>([])
   const [draft, setDraft] = useState('')
@@ -128,6 +176,12 @@ export function AgentPanel(): React.ReactElement {
   const [cost, setCost] = useState<number | null>(null)
   const ready = statuses[provider]?.executable !== null
   const sessionRef = useRef<string | null>(null)
+  const handoffRef = useRef<string | null>(null)
+  const contextRef = useRef<number | null>(null)
+  const chatTab = useRef<string | null>(null)
+  const autoCompact = useRef(false)
+  const [compacting, setCompacting] = useState(false)
+  const [copied, setCopied] = useState(false)
   const providerRef = useRef(provider)
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -139,39 +193,120 @@ export function AgentPanel(): React.ReactElement {
   })
   const fileProblem = files.items.some((item) => attachmentError(item, provider))
   const lastPaste = useRef<{ id: string; draft: string } | null>(null)
-  const documentPath = useDocumentPath()
+  const activeTab = useActiveTab()
+  const selectedLayers = useSelectedLayers(activeTab ?? null)
+  const [droppedLayers, setDroppedLayers] = useState<string | null>(null)
+  const layers = layersKey(selectedLayers) === droppedLayers ? [] : selectedLayers
+  const documentPath = activeTab?.path ?? null
+  const runTab = useRef<string | null>(null)
   const chatRef = useRef<{ id: string; createdAt: number } | null>(null)
   const [chatId, setChatId] = useState<string | null>(null)
   const busyRef = useRef(busy)
 
-  useEffect(() => {
-    if (busyRef.current === busy) return
-    busyRef.current = busy
+  function persist(): void {
     if (entries.length === 0) return
     chatRef.current ??= { id: crypto.randomUUID(), createdAt: Date.now() }
     setChatId(chatRef.current.id)
+    const owner = tabs.get(chatTab.current) ?? tabs.active()
+    if (!owner) return
+    chatTab.current = owner.id
+    owner.chatId = chatRef.current.id
     void window.suikopen.saveChat({
       ...chatRef.current,
       title: chatTitle(entries),
-      documentPath,
+      documentPath: owner.path,
+      tabId: owner.id,
       provider,
       model,
       sessionId: sessionRef.current,
       updatedAt: Date.now(),
       entries,
+      ...(handoffRef.current ? { handoff: handoffRef.current } : {}),
+      ...(contextRef.current ? { contextTokens: contextRef.current } : {}),
     })
+  }
+
+  useEffect(() => {
+    if (busyRef.current === busy) return
+    busyRef.current = busy
+    persist()
   }, [busy])
 
   useEffect(() => {
-    if (busy || entries.length) return
+    if (!busy) return
+    const timer = setTimeout(persist, 1500)
+    return () => clearTimeout(timer)
+  }, [entries, busy])
+
+  useEffect(() => {
+    if (chatTab.current && chatTab.current === activeTab?.id && chatRef.current) persist()
+  }, [documentPath])
+
+  useEffect(() => {
+    if (busy || !autoCompact.current) return
+    autoCompact.current = false
+    if (shouldCompact(provider, contextRef.current, sinceCompaction(entries))) void compact()
+  }, [busy])
+
+  async function copyHandoff(): Promise<void> {
+    const tab = tabs.get(chatTab.current) ?? tabs.active()
+    if (!tab) return
+    await navigator.clipboard.writeText(handoffFor(tab, { entries, handoff: handoffRef.current }))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  async function compact(): Promise<void> {
+    if (busy || sinceCompaction(entries).length === 0) return
+    const tabId = chatTab.current && tabs.get(chatTab.current) ? chatTab.current : tabs.getState().activeId
+    setCompacting(true)
+    setBusy(true)
+    const result = await window.suikopen.compactChat({
+      provider,
+      model,
+      sessionId: sessionRef.current,
+      transcript: transcriptOf(entries, handoffRef.current),
+      ...(tabId ? { tab: { id: tabId, name: tabLabels(tabs.getState().tabs).get(tabId) ?? tabId } } : {}),
+    })
+    if (result.ok) {
+      const store = tabId ? tabs.get(tabId)?.store : undefined
+      if (store && result.notes.length) {
+        store.setMemory((current) =>
+          result.notes.reduce(
+            (notes, note) => upsertNote(notes, { key: note.key, kind: MEMORY_KINDS.includes(note.kind as MemoryKind) ? (note.kind as MemoryKind) : 'note', text: note.text, by: 'agent' }, crypto.randomUUID().slice(0, 8), Date.now()).notes,
+            current
+          )
+        )
+      }
+      handoffRef.current = result.handoff
+      sessionRef.current = null
+      contextRef.current = null
+      setEntries((current) => [...current, { kind: 'compacted', handoff: result.handoff }])
+    } else {
+      setEntries((current) => [...current, { kind: 'error', text: `Could not summarise this chat: ${result.error}` }])
+    }
+    setCompacting(false)
+    setBusy(false)
+  }
+
+  const activeId = activeTab?.id ?? null
+
+  useEffect(() => {
+    if (busy || !activeId) return
+    if (chatTab.current === activeId && (entries.length || chatRef.current)) return
+    const tab = tabs.get(activeId)
+    if (!tab) return
     let current = true
-    void window.suikopen.listChats(documentPath).then((chats) => {
-      if (current && chats[0]) void openChat(chats[0].id)
+    reset(false)
+    chatTab.current = activeId
+    const load = tab.chatId ? Promise.resolve(tab.chatId) : window.suikopen.listChats(tab.path, tab.id).then((chats) => chats[0]?.id)
+    void load.then((id) => {
+      if (current && id && tabs.getState().activeId === activeId) void openChat(id)
     })
     return () => {
       current = false
     }
-  }, [documentPath])
+  }, [activeId, busy])
 
   async function openChat(id: string): Promise<void> {
     if (busy || id === chatRef.current?.id) return
@@ -183,6 +318,8 @@ export function AgentPanel(): React.ReactElement {
     }
     setModel(record.model)
     sessionRef.current = record.sessionId
+    handoffRef.current = record.handoff ?? null
+    contextRef.current = record.contextTokens ?? null
     chatRef.current = { id: record.id, createdAt: record.createdAt }
     setChatId(record.id)
     setEntries(record.entries)
@@ -233,21 +370,34 @@ export function AgentPanel(): React.ReactElement {
         return
       }
 
+      if (event.kind === 'tool' && event.name === 'remember') {
+        const note = (event.input as { text?: unknown } | null)?.text
+        if (typeof note === 'string') {
+          setEntries((current) => [...current, { kind: 'memory', text: note }])
+          return
+        }
+      }
+
       if (event.kind === 'tool') {
+        const ids = touchedIds(event.name, event.input)
         setEntries((current) => {
           const last = current[current.length - 1]
           if (last?.kind === 'tools') {
-            return [...current.slice(0, -1), { kind: 'tools', names: [...last.names, event.name] }]
+            const merged = [...new Set([...(last.ids ?? []), ...ids])]
+            return [...current.slice(0, -1), { kind: 'tools', names: [...last.names, event.name], ...(merged.length ? { ids: merged } : {}) }]
           }
-          return [...current, { kind: 'tools', names: [event.name] }]
+          return [...current, { kind: 'tools', names: [event.name], ...(ids.length ? { ids } : {}) }]
         })
         return
       }
 
       sessionRef.current = event.sessionId
+      if (event.contextTokens) contextRef.current = event.contextTokens
+      autoCompact.current = !event.error
       setCost(event.costUsd)
       setBusy(false)
-      setAgentWorking(false)
+      tabs.get(runTab.current)?.presence.setWorking(false)
+      runTab.current = null
       requestFit()
       const error = event.error
       if (error) {
@@ -313,23 +463,30 @@ export function AgentPanel(): React.ReactElement {
   }
 
   function toggleSkill(name: string): void {
+    if (skills.find((skill) => skill.name === name)?.builtIn && !attached.includes(name) && !busy && ready) {
+      send(draft.trim() || 'Hand off the latest design update.', true, [...attached, name])
+      return
+    }
     setAttached((current) => (current.includes(name) ? current.filter((entry) => entry !== name) : [...current, name]))
   }
 
-  function send(text = draft, withFiles = true): void {
+  function send(text = draft, withFiles = true, withSkills = attached): void {
     const chosen = withFiles ? sendableAttachments(files.items) : []
     const attachments = chosen.map(({ path, name, kind, mime, size }) => ({ path, name, kind, mime, size }))
     const typed = text.trim()
     if ((!typed && attachments.length === 0) || busy || !ready || (withFiles && fileProblem)) {
       return
     }
-    const prompt = typed || 'Use the attached files.'
+    const prompt = `${typed || 'Use the attached files.'}${layersBlock(layers)}`
+    const sentLayers = layers.map(({ id, name, type }) => ({ id, name, type }))
     const sent = chosen.map(({ name, kind, thumbnail, pasted }) => ({ name, kind, ...(thumbnail ? { thumbnail } : {}), ...(pasted ? { lines: pasted.lines } : {}) }))
-    setEntries((current) => [...current, { kind: 'user', text: typed, skills: attached, files: sent }])
+    setEntries((current) => [...current, { kind: 'user', text: typed, skills: withSkills, files: sent, ...(sentLayers.length ? { layers: sentLayers } : {}) }])
     setDraft('')
     if (withFiles) files.clear()
     setBusy(true)
-    setAgentWorking(true)
+    runTab.current = tabs.getState().activeId
+    chatTab.current = runTab.current
+    tabs.active()?.presence.setWorking(true)
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
     const efforts = models.find((option) => option.value === model)?.efforts ?? []
     void window.suikopen.runAgent({
@@ -339,19 +496,24 @@ export function AgentPanel(): React.ReactElement {
       sessionId: sessionRef.current,
       model,
       effort: effort && efforts.includes(effort) ? effort : null,
-      skills: attached,
+      skills: withSkills,
+      memory: tabs.active()?.store.getState().memory ?? [],
+      ...(handoffRef.current ? { handoff: handoffRef.current } : {}),
+      ...(runTab.current ? { tab: { id: runTab.current, name: tabLabels(tabs.getState().tabs).get(runTab.current) ?? runTab.current } } : {}),
     })
   }
 
-  function reset(): void {
+  function reset(focus = true): void {
     sessionRef.current = null
+    handoffRef.current = null
+    contextRef.current = null
     chatRef.current = null
     setChatId(null)
     setEntries([])
     setCost(null)
     setAttached([])
     files.clear()
-    inputRef.current?.focus()
+    if (focus) inputRef.current?.focus()
   }
 
   return (
@@ -365,18 +527,24 @@ export function AgentPanel(): React.ReactElement {
           title={chatTitle(entries)}
           currentId={chatId}
           documentPath={documentPath}
+          tabId={activeTab?.id}
           disabled={busy}
           onOpen={(id) => void openChat(id)}
           onDelete={() => void deleteCurrent()}
         />
-        <button className="icon-button" aria-label="Agent settings" title="Agent settings  ⌘," onClick={() => openSettings('agents')}>
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <path d="M2 4h6M11 4h1M2 10h1M6 10h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            <circle cx="9.5" cy="4" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-            <circle cx="4.5" cy="10" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <button
+          className="icon-button"
+          aria-label={copied ? 'Handoff copied' : 'Copy handoff for a coding agent'}
+          title={copied ? 'Copied' : 'Copy handoff\nWhat was asked, decided and changed, to paste into a coding agent'}
+          onClick={() => void copyHandoff()}
+          disabled={entries.length === 0}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            {copied ? <path d="M3 7.5 6 10.5l5-6" /> : <path d="M5 4.5V3a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H9.5M3 5h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" />}
           </svg>
         </button>
-        <button className="icon-button" aria-label="New chat" title="New chat" onClick={reset} disabled={busy || entries.length === 0}>
+        <span className="sr-only" aria-live="polite">{copied ? 'Handoff copied' : ''}</span>
+        <button className="icon-button" aria-label="New chat" title="New chat" onClick={() => reset()} disabled={busy || entries.length === 0}>
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M7 2.5v9M2.5 7h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
@@ -402,12 +570,28 @@ export function AgentPanel(): React.ReactElement {
           if (entry.kind === 'tools') {
             return <ToolGroup key={index} names={entry.names} />
           }
+          if (entry.kind === 'memory') {
+            return (
+              <div key={index} className="agent-memory">
+                <span>Remembered: {entry.text}</span>
+                <button type="button" onClick={() => showLeftTab('memory')}>View</button>
+              </div>
+            )
+          }
+          if (entry.kind === 'compacted') {
+            return (
+              <div key={index} className="agent-compacted" role="note">
+                Earlier messages summarised
+              </div>
+            )
+          }
           if (entry.kind === 'assistant') {
             return (
               <div key={index} className="agent-assistant md">
                 <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
                   {entry.text}
                 </Markdown>
+                {busy && index === entries.length - 1 ? null : <CopyReply text={entry.text} />}
               </div>
             )
           }
@@ -415,6 +599,11 @@ export function AgentPanel(): React.ReactElement {
             return (
               <div key={index} className="agent-user">
                 {entry.skills.length ? <div className="agent-user-skills">{entry.skills.map((name) => `/${name}`).join(' ')}</div> : null}
+                {entry.layers?.length ? (
+                  <div className="sent-layers">
+                    <LayerChip layers={entry.layers} />
+                  </div>
+                ) : null}
                 <SentAttachments items={entry.files} />
                 {entry.text}
               </div>
@@ -438,13 +627,18 @@ export function AgentPanel(): React.ReactElement {
               <span />
               <span />
               <span />
-              Designing…
+              {compacting ? 'Summarising earlier messages…' : 'Designing…'}
             </>
           ) : null}
         </div>
       </div>
 
       <div className="agent-compose">
+        {layers.length ? (
+          <div className="agent-layer-refs">
+            <LayerChip layers={layers} onRemove={() => setDroppedLayers(layersKey(selectedLayers))} />
+          </div>
+        ) : null}
         <AttachmentChips items={files.items} provider={provider} onRemove={files.remove} onInsert={unpaste} />
         {attached.length ? (
           <ul className="agent-chips" aria-label="Attached skills">

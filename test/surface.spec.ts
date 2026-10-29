@@ -30,9 +30,9 @@ describe('applyCanvasSize', () => {
 })
 
 describe('wrapSurface', () => {
-  it('deletes the surface exactly once however often dispose is called', () => {
+  it('disposes the surface and its GPU context exactly once however often dispose is called', () => {
     const remove = vi.fn()
-    const handle = wrapSurface({ delete: remove } as unknown as Surface, 800, 600, 2)
+    const handle = wrapSurface({ dispose: remove } as unknown as Surface, 800, 600, 2)
 
     handle.dispose()
     handle.dispose()
@@ -59,5 +59,17 @@ describe('createCanvasKitLoader', () => {
     await createCanvasKitLoader(init, '/assets/canvaskit-abc123.wasm')()
 
     expect(init.mock.calls[0]?.[0]?.locateFile('canvaskit.wasm')).toBe('/assets/canvaskit-abc123.wasm')
+  })
+})
+
+describe('snapshotScale', async () => {
+  const { snapshotScale, SNAPSHOT_MAX_PIXELS, SNAPSHOT_MAX_SIDE } = await import('../src/renderer/canvas/paint')
+
+  it('keeps small frames at 2x and caps huge ones', () => {
+    expect(snapshotScale(400, 300)).toBe(2)
+    const wide = snapshotScale(12000, 4000)
+    expect(12000 * wide).toBeLessThanOrEqual(SNAPSHOT_MAX_SIDE)
+    const big = snapshotScale(3000, 3000)
+    expect(3000 * big * 3000 * big).toBeLessThanOrEqual(SNAPSHOT_MAX_PIXELS + 1)
   })
 })

@@ -1,19 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Document } from '../shared/schema/document'
+import { useEffect, useState } from 'react'
 import { Stage } from './canvas/Stage'
-import { useFileSession, type Replacement } from './document/file-session'
 import { useInitialDocument } from './document/use-document'
-import { createAgentHandlers } from './mcp/handlers'
-import { createDocumentStore } from './store/document-store'
-import { createMutationQueue } from './store/mutation-queue'
-import { createSelectionStore } from './store/selection'
 import { DocumentStoreProvider, SelectionStoreProvider } from './store/use-store'
 import { LeftPanel, RightPanel, usePanelCommands } from './ui/Panels'
 import { SettingsDialog } from './ui/SettingsDialog'
 import { createEditCommands } from './tools/commands'
 import { TextEditor } from './tools/TextEditor'
-import { setDocumentPath } from './document/current-path'
-import { Toolbar } from './tools/Toolbar'
+import { Toolbar, ZoomControl } from './tools/Toolbar'
+import { tabs, useActiveTab, type Tab } from './tabs/tabs-store'
+import { newTab, openDialog, useTabsSession } from './tabs/session'
+import { TabBar } from './tabs/TabBar'
 
 const message: React.CSSProperties = {
   position: 'absolute',
@@ -27,50 +23,23 @@ const message: React.CSSProperties = {
   textAlign: 'center',
 }
 
-function Editor({
-  document,
-  path,
-  assetBase,
-  onReplace,
-}: {
-  document: Document
-  path: string | null
-  assetBase: string | null
-  onReplace: (replacement: Replacement) => void
-}): React.ReactElement {
-  const [store] = useState(() => createDocumentStore(document))
-  const [selection] = useState(() => createSelectionStore())
-  const [queue] = useState(() => createMutationQueue(store))
-
+function Workspace({ tab }: { tab: Tab }): React.ReactElement {
   usePanelCommands()
-  const session = useFileSession(store, selection, path, assetBase, onReplace)
-  const pathRef = useRef(session.path)
-  pathRef.current = session.path
-  useEffect(() => setDocumentPath(session.path), [session.path])
 
-  useEffect(() => createEditCommands(store, selection), [store, selection])
-
-  useEffect(() => {
-    const handle = createAgentHandlers({ store, selection, queue, documentPath: () => pathRef.current })
-    const off = window.suikopen.onAgentCall((request) => handle(request))
-
-    return () => {
-      off()
-      queue.dispose()
-    }
-  }, [store, selection, queue])
+  useEffect(() => createEditCommands(tab.store, tab.selection), [tab])
 
   return (
-    <DocumentStoreProvider value={store}>
-      <SelectionStoreProvider value={selection}>
-        <div className="shell">
-          <LeftPanel />
+    <DocumentStoreProvider value={tab.store}>
+      <SelectionStoreProvider value={tab.selection}>
+        <div className="shell" id="doc-panel" role="tabpanel" aria-labelledby={`doc-tab-${tab.id}`}>
+          <LeftPanel tabId={tab.id} />
           <main className="canvas-area" aria-label="Canvas">
-            <Stage />
-            <TextEditor />
+            <Stage key={`stage-${tab.id}`} tab={tab} />
+            <TextEditor key={`text-${tab.id}`} />
             <Toolbar />
+            <ZoomControl />
           </main>
-          <RightPanel />
+          <RightPanel tabId={tab.id} />
         </div>
         <SettingsDialog />
       </SelectionStoreProvider>
@@ -78,35 +47,51 @@ function Editor({
   )
 }
 
+function Tabs(): React.ReactElement {
+  useTabsSession()
+  const tab = useActiveTab()
+  return (
+    <div className="app">
+      <TabBar />
+      {tab ? (
+        <Workspace tab={tab} />
+      ) : (
+        <div className="empty-workspace" id="doc-panel" role="tabpanel" aria-label="No document open">
+          <p>No document open</p>
+          <div>
+            <button type="button" onClick={() => void newTab()}>New file <kbd>⌘N</kbd></button>
+            <button type="button" onClick={() => void openDialog()}>Open… <kbd>⌘O</kbd></button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function App(): React.ReactElement {
   const initial = useInitialDocument()
-  const [replacement, setReplacement] = useState<(Replacement & { key: number }) | null>(null)
-  const onReplace = useCallback(
-    (next: Replacement) => setReplacement((current) => ({ ...next, key: (current?.key ?? 0) + 1 })),
-    []
-  )
+  const [ready, setReady] = useState(false)
 
-  if (replacement) {
-    return (
-      <Editor
-        key={replacement.key}
-        document={replacement.document}
-        path={replacement.path}
-        assetBase={replacement.assetBase}
-        onReplace={onReplace}
-      />
-    )
-  }
-
-  if (initial.status === 'loading') {
-    return <div style={message}>Opening document…</div>
-  }
+  useEffect(() => {
+    if (initial.status !== 'ready' || ready) {
+      return
+    }
+    for (const opened of initial.opened) {
+      tabs.open({ id: opened.tabId, document: opened.document, path: opened.path, assetBase: opened.assetBase, recovered: opened.recovered })
+    }
+    if (initial.activeTabId) {
+      tabs.activate(initial.activeTabId)
+    }
+    setReady(true)
+  }, [initial, ready])
 
   if (initial.status === 'failed') {
     return <div style={{ ...message, color: '#e4606d' }}>{initial.error}</div>
   }
 
-  return (
-    <Editor key={0} document={initial.document} path={initial.path} assetBase={initial.assetBase} onReplace={onReplace} />
-  )
+  if (!ready) {
+    return <div style={message}>Opening document…</div>
+  }
+
+  return <Tabs />
 }

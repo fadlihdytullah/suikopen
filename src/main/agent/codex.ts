@@ -6,7 +6,7 @@ import { promptWithText } from './attachments'
 import { DEFAULT_MODEL, FALLBACK_MODELS, isEffort, type AgentModelOption } from '../../shared/agent'
 import { MCP_SERVER_NAME } from '../mcp/server'
 import { mcpToken } from '../mcp/token'
-import { childEnvironment, cleanError, findExecutable, MCP_URL, runCommand, systemPrompt, workspace, type ProviderRun } from './process'
+import { childEnvironment, cleanError, findExecutable, mcpUrl, runCommand, systemPrompt, workspace, type ProviderRun } from './process'
 
 type CachedModel = {
   slug: string
@@ -81,10 +81,10 @@ export const runCodex: ProviderRun = async (request, signal, emit) => {
     ...(executable ? { codexPathOverride: executable } : {}),
     config: {
       features: Object.fromEntries(DISABLED_CODEX_FEATURES.map((feature) => [feature, false])),
-      developer_instructions: await systemPrompt(request.skills),
+      developer_instructions: await systemPrompt(request),
       mcp_servers: {
         [MCP_SERVER_NAME]: {
-          url: MCP_URL,
+          url: mcpUrl(request.tab),
           bearer_token_env_var: 'SUIKOPEN_MCP_TOKEN',
           default_tools_approval_mode: 'approve',
           startup_timeout_sec: 30,
@@ -111,6 +111,7 @@ export const runCodex: ProviderRun = async (request, signal, emit) => {
   let sessionId = request.sessionId
   let error: string | null = null
   let afterText = false
+  let contextTokens: number | null = null
 
   try {
     for await (const event of events) {
@@ -136,6 +137,8 @@ export const runCodex: ProviderRun = async (request, signal, emit) => {
           text: afterText ? `\n\n${event.item.text}` : event.item.text,
         })
         afterText = true
+      } else if (event.type === 'turn.completed') {
+        contextTokens = event.usage.input_tokens + event.usage.output_tokens
       } else if (event.type === 'turn.failed') {
         error = codexError(event.error.message)
       } else if (event.type === 'error') {
@@ -148,5 +151,5 @@ export const runCodex: ProviderRun = async (request, signal, emit) => {
     }
   }
 
-  return { sessionId, costUsd: null, error }
+  return { sessionId, costUsd: null, error, contextTokens }
 }

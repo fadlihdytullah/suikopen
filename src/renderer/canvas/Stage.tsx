@@ -1,13 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { createPointerController, type Overlay } from '../tools/pointer-controller'
-import { useDocumentStore, useSelectionStore } from '../store/use-store'
+import { takeSwitchDuration, type Tab } from '../tabs/tabs-store'
 import { onThemeChange } from '../document/resolved'
 import { resolvedDocument } from '../document/current'
 import { loadCanvasKit } from './canvaskit'
 import { documentBounds, paintScene } from './paint'
 import { invalidateSceneCaches, itemById, sceneItems, unionBounds } from './scene-index'
 import { onFitRequest, onZoomRequest, publishViewport, type ZoomRequest } from './viewport-ref'
-import { agentGlow, isAnimating, presence, subscribePresence } from '../agent/presence'
 import { onImageLoaded } from './image-cache'
 import { onCanvasAppearanceChange } from './canvas-theme'
 import { resetLayoutCache } from '../layout/yoga-tree'
@@ -15,15 +14,24 @@ import { setTextMeasurer } from '../layout/text-measure'
 import { ensureFont, DEFAULT_FAMILY, onFontLoaded } from '../text/font-manager'
 import { measureParagraph } from '../text/paragraph'
 import { createSurface, type SurfaceHandle } from './surface'
+import { labelsOf } from './labels'
+import { panelInsets } from '../ui/panel-state'
 import { clampScale, fitToBounds, toScreen, zoomAt, type Viewport, IDENTITY_VIEWPORT } from './viewport'
 import type { Rect } from './scene-index'
 
-export function Stage(): React.ReactElement {
-  const store = useDocumentStore()
-  const selection = useSelectionStore()
+function fitVisible(bounds: Rect, width: number, height: number): Viewport {
+  const { left, right } = panelInsets()
+  const visible = Math.max(width - left - right, Math.min(width, 200))
+  const offset = visible === width ? 0 : left
+  const fitted = fitToBounds(bounds, visible, height)
+  return { ...fitted, x: fitted.x + offset }
+}
+
+export function Stage({ tab }: { tab: Tab }): React.ReactElement {
+  const { store, selection, presence } = tab
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const viewportRef = useRef<Viewport>(IDENTITY_VIEWPORT)
+  const viewportRef = useRef<Viewport>(tab.viewport ?? IDENTITY_VIEWPORT)
 
   useEffect(() => {
     const hostElement = hostRef.current
@@ -38,10 +46,13 @@ export function Stage(): React.ReactElement {
     let handle: SurfaceHandle | null = null
     let frame = 0
     let dirty = true
-    let fitted = false
+    let fitted = tab.viewport !== null
     let overlay: Overlay = { marquee: null, guides: [] }
     let camera: { from: Viewport; to: Viewport; start: number } | null = null
     let followedAt = 0
+    let contextLost = false
+    let lastRecovery = 0
+    let failures = 0
     const CAMERA_MS = 360
 
     function moveCamera(to: Viewport | null): void {
@@ -56,22 +67,24 @@ export function Stage(): React.ReactElement {
       const topLeft = toScreen(current, { x: rect.x, y: rect.y })
       const bottomRight = toScreen(current, { x: rect.x + rect.width, y: rect.y + rect.height })
       const margin = 40
+      const { left, right } = panelInsets()
 
       if (
-        topLeft.x >= margin &&
+        topLeft.x >= margin + left &&
         topLeft.y >= margin &&
-        bottomRight.x <= box.width - margin &&
+        bottomRight.x <= box.width - margin - right &&
         bottomRight.y <= box.height - margin
       ) {
         return null
       }
 
-      const fit = Math.min((box.width - margin * 2) / rect.width, (box.height - margin * 2) / rect.height)
+      const visible = Math.max(box.width - left - right, 200)
+      const fit = Math.min((visible - margin * 2) / rect.width, (box.height - margin * 2) / rect.height)
       const scale = clampScale(Math.min(current.scale, fit))
 
       return {
         scale,
-        x: box.width / 2 - (rect.x + rect.width / 2) * scale,
+        x: left + visible / 2 - (rect.x + rect.width / 2) * scale,
         y: box.height / 2 - (rect.y + rect.height / 2) * scale,
       }
     }
@@ -108,18 +121,62 @@ export function Stage(): React.ReactElement {
         }
 
         if (!fitted && rect.width > 0 && rect.height > 0) {
-          viewportRef.current = fitToBounds(documentBounds(resolvedDocument(store)), rect.width, rect.height)
+          viewportRef.current = fitVisible(documentBounds(resolvedDocument(store)), rect.width, rect.height)
           fitted = true
         }
 
         paint()
       }
 
-      function paint(): void {
-        if (!handle) {
+      function resetSurface(): void {
+        try {
+          handle?.dispose()
+        } catch {}
+        handle = null
+        try {
+          rebuild()
+        } catch (error) {
+          report('could not recreate the surface', error, true)
+        }
+      }
+
+      function report(what: string, error: unknown, fatal: boolean): void {
+        const heap = (canvasKit as unknown as { HEAPU8?: Uint8Array }).HEAPU8?.length ?? 0
+        const message = `${what}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)} (heap ${Math.round(heap / 1048576)}MB)`
+        console.error(`[canvas] ${message}`)
+        window.suikopen.reportError(message, fatal)
+      }
+
+      function recover(error: unknown): void {
+        const now = performance.now()
+        if (now - lastRecovery < 1000) {
           return
         }
-        const glow = agentGlow(performance.now())
+        lastRecovery = now
+        failures += 1
+        if (failures >= 3) {
+          report('paint keeps failing, reloading', error, true)
+          return
+        }
+        report('paint failed, recreating the surface', error, false)
+        resetSurface()
+      }
+
+      function onContextLost(event: Event): void {
+        event.preventDefault()
+        contextLost = true
+      }
+
+      function onContextRestored(): void {
+        contextLost = false
+        resetSurface()
+      }
+
+      function paint(): void {
+        if (!handle || contextLost) {
+          return
+        }
+        const glow = presence.glow(performance.now())
         const box = canvas.getBoundingClientRect()
         publishViewport(viewportRef.current, { x: box.left, y: box.top })
         const document = resolvedDocument(store)
@@ -129,9 +186,11 @@ export function Stage(): React.ReactElement {
           document,
           viewport: viewportRef.current,
           dpr: handle.dpr,
+          reveal: presence.revealAlpha,
           overlay: {
             selected: sceneItems(document).filter((item) => selected.has(item.node.id)),
             marquee: overlay.marquee,
+            labels: labelsOf(document, store.getState()),
             guides: overlay.guides,
             agentFocus: glow ? (() => {
               const item = itemById(document, glow.id)
@@ -140,10 +199,11 @@ export function Stage(): React.ReactElement {
           },
         })
         dirty = false
+        failures = 0
       }
 
-      function tick(): void {
-        const agent = presence()
+      function step(): void {
+        const agent = presence.state()
         if (agent.focusId && agent.focusAt !== followedAt) {
           followedAt = agent.focusAt
           const item = itemById(resolvedDocument(store), agent.focusId)
@@ -170,14 +230,22 @@ export function Stage(): React.ReactElement {
           dirty = true
         }
 
-        if (isAnimating()) {
+        if (presence.isAnimating()) {
           dirty = true
         }
 
         if (dirty) {
           paint()
         }
+      }
+
+      function tick(): void {
         frame = requestAnimationFrame(tick)
+        try {
+          step()
+        } catch (error) {
+          recover(error)
+        }
       }
 
       const controller = createPointerController({
@@ -198,10 +266,10 @@ export function Stage(): React.ReactElement {
       const unsubscribeDocument = store.subscribe(markDirty)
       const unsubscribeTheme = onThemeChange(markDirty)
       const unsubscribeAppearance = onCanvasAppearanceChange(markDirty)
-      const unsubscribePresence = subscribePresence(markDirty)
+      const unsubscribePresence = presence.subscribe(markDirty)
       const unsubscribeFit = onFitRequest(() => {
         const box = host.getBoundingClientRect()
-        moveCamera(fitToBounds(documentBounds(resolvedDocument(store)), box.width, box.height))
+        moveCamera(fitVisible(documentBounds(resolvedDocument(store)), box.width, box.height))
         markDirty()
       })
       const unsubscribeZoom = onZoomRequest((request: ZoomRequest) => {
@@ -217,7 +285,7 @@ export function Stage(): React.ReactElement {
           const selected = selection.getState()
           const bounds = request === 'selection' ? unionBounds(sceneItems(document).filter((item) => selected.has(item.node.id))) : documentBounds(document)
           if (bounds) {
-            moveCamera(fitToBounds(bounds, box.width, box.height))
+            moveCamera(fitVisible(bounds, box.width, box.height))
           }
         }
         markDirty()
@@ -226,8 +294,14 @@ export function Stage(): React.ReactElement {
       const observer = new ResizeObserver(rebuild)
       observer.observe(host)
       window.addEventListener('resize', rebuild)
+      canvas.addEventListener('webglcontextlost', onContextLost)
+      canvas.addEventListener('webglcontextrestored', onContextRestored)
 
       rebuild()
+      const switchMs = takeSwitchDuration(performance.now())
+      if (switchMs !== null && switchMs > 100) {
+        console.warn(`[tabs] switch took ${Math.round(switchMs)}ms`)
+      }
       tick()
 
       return () => {
@@ -242,6 +316,8 @@ export function Stage(): React.ReactElement {
         unsubscribeSelection()
         observer.disconnect()
         window.removeEventListener('resize', rebuild)
+        canvas.removeEventListener('webglcontextlost', onContextLost)
+        canvas.removeEventListener('webglcontextrestored', onContextRestored)
         cancelAnimationFrame(frame)
         handle?.dispose()
         handle = null
@@ -250,9 +326,10 @@ export function Stage(): React.ReactElement {
 
     return () => {
       disposed = true
+      tab.viewport = viewportRef.current
       ready.then((stop) => stop())
     }
-  }, [store, selection])
+  }, [tab, store, selection, presence])
 
   return (
     <div ref={hostRef} style={{ width: '100%', height: '100%' }}>

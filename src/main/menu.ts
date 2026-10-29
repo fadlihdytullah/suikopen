@@ -12,6 +12,7 @@ export type MenuCommand =
   | 'toggle-panels'
   | 'show-layers'
   | 'show-agent'
+  | 'show-memory'
   | 'open-settings'
   | 'duplicate'
   | 'group'
@@ -23,9 +24,31 @@ export type MenuCommand =
   | 'send-to-back'
   | 'zoom-in'
   | 'zoom-out'
+  | 'next-tab'
+  | 'close-tab'
+  | 'previous-tab'
 
 function send(command: MenuCommand): void {
   BrowserWindow.getFocusedWindow()?.webContents.send('menu:command', command)
+}
+
+type WindowTab = { id: string; name: string; active: boolean }
+
+let windowTabs: WindowTab[] = []
+
+function activateTab(id: string): void {
+  BrowserWindow.getFocusedWindow()?.webContents.send('tabs:activate', id)
+}
+
+export function setWindowTabs(list: WindowTab[]): void {
+  const same =
+    list.length === windowTabs.length &&
+    list.every((tab, index) => tab.id === windowTabs[index]?.id && tab.name === windowTabs[index]?.name && tab.active === windowTabs[index]?.active)
+  if (same) {
+    return
+  }
+  windowTabs = list
+  createApplicationMenu()
 }
 
 export function createApplicationMenu(): void {
@@ -56,6 +79,7 @@ export function createApplicationMenu(): void {
       label: 'File',
       submenu: [
         { label: 'New', accelerator: 'CmdOrCtrl+N', click: () => send('new') },
+        { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => send('new') },
         { label: 'Open…', accelerator: 'CmdOrCtrl+O', click: () => send('open') },
         { role: 'recentDocuments', submenu: [{ role: 'clearRecentDocuments' }] },
         { type: 'separator' },
@@ -63,7 +87,8 @@ export function createApplicationMenu(): void {
         { label: 'Save As…', accelerator: 'CmdOrCtrl+Shift+S', click: () => send('save-as') },
         { type: 'separator' },
         ...(isMac ? [] : [{ label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => send('open-settings') }, { type: 'separator' as const }]),
-        isMac ? { role: 'close' } : { role: 'quit' },
+        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => send('close-tab') },
+        isMac ? { role: 'close', accelerator: 'CmdOrCtrl+Shift+W' } : { role: 'quit' },
       ],
     },
     {
@@ -128,6 +153,7 @@ export function createApplicationMenu(): void {
       submenu: [
         { label: 'Show Layers', accelerator: 'Alt+1', click: () => send('show-layers') },
         { label: 'Show Agent', accelerator: 'Alt+2', click: () => send('show-agent') },
+        { label: 'Show Memory', accelerator: 'Alt+3', click: () => send('show-memory') },
         { label: 'Toggle Panels', accelerator: 'CmdOrCtrl+\\', click: () => send('toggle-panels') },
         { type: 'separator' },
         { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => send('zoom-in') },
@@ -139,7 +165,25 @@ export function createApplicationMenu(): void {
         { role: 'togglefullscreen' },
       ],
     },
-    { role: 'windowMenu' },
+    {
+      role: 'windowMenu',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { type: 'separator' },
+        { label: 'Show Next Tab', accelerator: 'Ctrl+Tab', click: () => send('next-tab') },
+        { label: 'Show Previous Tab', accelerator: 'Ctrl+Shift+Tab', click: () => send('previous-tab') },
+        ...(windowTabs.length > 0 ? [{ type: 'separator' as const }] : []),
+        ...windowTabs.map((tab) => ({
+          label: tab.name,
+          type: 'checkbox' as const,
+          checked: tab.active,
+          click: () => activateTab(tab.id),
+        })),
+        { type: 'separator' },
+        { role: 'front' },
+      ],
+    },
   ]
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))

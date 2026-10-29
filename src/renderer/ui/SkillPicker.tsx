@@ -79,7 +79,7 @@ export function SkillPicker({
           <div id={popover.id} role="listbox" aria-multiselectable="true" aria-label="Skills" className="popover-scroll">
             {matches.length === 0 ? (
               <div className="popover-empty">
-                {skills.length ? 'No skills match.' : 'No skills found in ~/.agents/skills.'}
+                No skills match.
               </div>
             ) : null}
             {matches.map((skill, index) => {
@@ -96,7 +96,10 @@ export function SkillPicker({
                 >
                   <span className="popover-check">{on ? '✓' : ''}</span>
                   <span className="popover-text">
-                    <span className="popover-name">{skill.name}</span>
+                    <span className="popover-name">
+                      {skill.name}
+                      {skill.builtIn ? <span className="popover-badge">Built-in</span> : null}
+                    </span>
                     {skill.description ? <span className="popover-desc">{skill.description}</span> : null}
                   </span>
                 </div>

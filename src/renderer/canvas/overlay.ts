@@ -4,6 +4,7 @@ import { HANDLES, handlePoint } from '../tools/transform'
 import type { Rect, SceneItem } from './scene-index'
 import { toScreen, type Viewport } from './viewport'
 import { cornerRadii, hasChildren } from '../../shared/schema/node'
+import { paintLabels, type Label } from './labels'
 
 const ACCENT: [number, number, number, number] = [0.247, 0.541, 1, 1]
 const GUIDE: [number, number, number, number] = [1, 0.278, 0.439, 1]
@@ -14,6 +15,7 @@ export type OverlayScene = {
   marquee: Rect | null
   guides: Guide[]
   agentFocus?: AgentFocus | null
+  labels?: Label[]
 }
 
 const AGENT: [number, number, number, number] = [0.851, 0.467, 0.341, 1]
@@ -130,6 +132,10 @@ export function paintOverlay(
   viewport: Viewport,
   scene: OverlayScene
 ): void {
+  if (scene.labels) {
+    paintLabels(canvasKit, canvas, viewport, scene.labels)
+  }
+
   const stroke = new canvasKit.Paint()
   stroke.setColor(canvasKit.Color4f(...ACCENT))
   stroke.setStyle(canvasKit.PaintStyle.Stroke)

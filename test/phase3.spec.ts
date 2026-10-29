@@ -1,3 +1,4 @@
+import { createPresence } from '../src/renderer/agent/presence'
 import { mkdtemp, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -77,7 +78,7 @@ describe('styles', () => {
 describe('set_variables', () => {
   function harness() {
     const store = createDocumentStore(parseDocument({ version: 1, variables: { old: { type: 'number', value: 1 } }, children: [] }))
-    const handle = createAgentHandlers({ store, selection: createSelectionStore(), queue: createMutationQueue(store), documentPath: () => null })
+    const handle = createAgentHandlers({ store, selection: createSelectionStore(), queue: createMutationQueue(store), presence: createPresence(), documentPath: () => null })
     return { store, call: (params: Record<string, unknown>) => handle({ id: 'v', method: 'set_variables', params }) }
   }
 

@@ -1,3 +1,4 @@
+import { createPresence } from '../src/renderer/agent/presence'
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,7 +21,7 @@ describe('image hosts', () => {
 
   it('refuses agent edits that point an image at another host', async () => {
     const store = createDocumentStore(parseDocument({ version: 1, children: [{ id: 'f', type: 'frame', x: 0, y: 0, width: 100, height: 100, children: [] }] }))
-    const handle = createAgentHandlers({ store, selection: createSelectionStore(), queue: createMutationQueue(store), documentPath: () => null })
+    const handle = createAgentHandlers({ store, selection: createSelectionStore(), queue: createMutationQueue(store), presence: createPresence(), documentPath: () => null })
     const node = { id: 'img', type: 'rectangle', x: 0, y: 0, width: 10, height: 10, fill: { type: 'image', url: 'https://evil.example/?d=x' } }
 
     await expect(handle({ id: '1', method: 'create_node', params: { parentId: 'f', node } })).rejects.toThrow(/was refused/)

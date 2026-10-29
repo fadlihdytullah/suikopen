@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { readDocument, writeDocument } from '../src/main/file-io'
+import { readCheckpoint, readDocument, writeCheckpoint, writeDocument } from '../src/main/file-io'
 import { parseDocument, type Document } from '../src/shared/schema/document'
 
 const sample: Document = {
@@ -68,5 +68,19 @@ describe('readDocument', () => {
     await writeFile(path, '{ not json', 'utf8')
 
     await expect(readDocument(path)).rejects.toThrow(/not valid JSON/)
+  })
+})
+
+describe('checkpoint', () => {
+  it('round-trips and rejects an invalid document', async () => {
+    const directory = await workspace()
+    const path = join(directory, 'recovery.json')
+    const checkpoint = { document: sample, path: '/tmp/doc.spen', assetBase: null, dirty: true }
+
+    await writeCheckpoint(path, checkpoint)
+    expect(await readCheckpoint(path)).toEqual(checkpoint)
+
+    await writeFile(path, JSON.stringify({ ...checkpoint, document: { version: 1, children: 'nope' } }))
+    expect(await readCheckpoint(path)).toBeNull()
   })
 })

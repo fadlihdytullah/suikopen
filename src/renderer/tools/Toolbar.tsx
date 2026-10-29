@@ -1,4 +1,5 @@
-import { useRef } from 'react'
+import { useRef, useSyncExternalStore } from 'react'
+import { currentViewport, onViewportChange, requestZoom } from '../canvas/viewport-ref'
 import { setTool, useToolState, type Tool } from './tool-state'
 
 const TOOLS: { tool: Tool; label: string; key: string; icon: React.ReactNode }[] = [
@@ -45,6 +46,32 @@ export function Toolbar(): React.ReactElement {
           </svg>
         </button>
       ))}
+    </div>
+  )
+}
+
+function zoomPercent(): number {
+  return Math.round(currentViewport().viewport.scale * 100)
+}
+
+export function ZoomControl(): React.ReactElement {
+  const percent = useSyncExternalStore(onViewportChange, zoomPercent)
+
+  return (
+    <div className="toolbar zoom-control" role="toolbar" aria-label="Zoom">
+      <button className="tool" aria-label="Zoom out" aria-keyshortcuts="Meta+-" data-tip="Zoom out  ⌘−" onClick={() => requestZoom('out')}>
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+          <path d="M4.5 9h9" />
+        </svg>
+      </button>
+      <button className="tool zoom-value" aria-label={`Zoom ${percent}%, fit to screen`} data-tip="Zoom to fit  ⇧1" onClick={() => requestZoom('fit')}>
+        {percent}%
+      </button>
+      <button className="tool" aria-label="Zoom in" aria-keyshortcuts="Meta+=" data-tip="Zoom in  ⌘+" onClick={() => requestZoom('in')}>
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+          <path d="M4.5 9h9M9 4.5v9" />
+        </svg>
+      </button>
     </div>
   )
 }

@@ -36,7 +36,7 @@ function IntegrationRow({ id, name }: { id: string; name: string }): React.React
   async function connect(): Promise<void> {
     setWorking(true)
     const outcome = await window.suikopen.mcpInstall(id)
-    setResult(outcome.ok ? { ok: true, message: `Connected. Restart ${name} to pick it up.` } : outcome)
+    setResult(outcome.ok ? { ok: true, message: `Connected. Restart ${name} to pick it up.${id === 'gemini' ? '' : ' The /design-handoff skill was added too.'}` } : outcome)
     setStatus(await window.suikopen.mcpStatus(id))
     setWorking(false)
   }

@@ -16,7 +16,7 @@ function fileFor(id: string): string {
   return join(directory(), `${id}.json`)
 }
 
-export async function listChats(documentPath?: string | null): Promise<ChatSummary[]> {
+export async function listChats(documentPath?: string | null, tabId?: string): Promise<ChatSummary[]> {
   let names: string[] = []
   try {
     names = (await readdir(directory())).filter((name) => name.endsWith('.json'))
@@ -28,15 +28,16 @@ export async function listChats(documentPath?: string | null): Promise<ChatSumma
       try {
         const record = JSON.parse(await readFile(join(directory(), name), 'utf8')) as ChatRecord
         const { id, title, provider, updatedAt } = record
-        return { id, title, documentPath: record.documentPath ?? null, provider, updatedAt }
+        return { id, title, documentPath: record.documentPath ?? null, provider, updatedAt, tabId: record.tabId }
       } catch {
         return null
       }
     })
   )
   return chats
-    .filter((chat): chat is ChatSummary => chat !== null && (documentPath === undefined || chat.documentPath === documentPath))
+    .filter((chat): chat is ChatSummary & { tabId: string | undefined } => chat !== null && (documentPath === undefined || (chat.documentPath === documentPath && (documentPath !== null || chat.tabId === tabId))))
     .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map(({ tabId: _tabId, ...summary }) => summary)
 }
 
 export async function getChat(id: string): Promise<ChatRecord | null> {

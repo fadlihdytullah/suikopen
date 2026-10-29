@@ -1,3 +1,4 @@
+import { createPresence } from '../src/renderer/agent/presence'
 import { describe, expect, it } from 'vitest'
 import { parseDocument } from '../src/shared/schema/document'
 import { createDocumentStore } from '../src/renderer/store/document-store'
@@ -53,7 +54,7 @@ function harness() {
     store,
     selection: createSelectionStore(),
     queue: createMutationQueue(store),
-    documentPath: () => null,
+    presence: createPresence(), documentPath: () => null,
   })
   const call = (method: string, params: Record<string, unknown> = {}) => handle({ id: method, method, params })
   return { store, call }

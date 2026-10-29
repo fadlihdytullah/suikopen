@@ -36,14 +36,19 @@ export function resetResolvedCache(): void {
   themeKey = ''
 }
 
-export function resolved(document: Document): ResolveResult {
+export function resolved(document: Document, selection?: ThemeSelection): ResolveResult {
+  const key = selection ? JSON.stringify(selection) : themeKey
   const cached = cache.get(document)
-  if (cached && cached.key === themeKey) {
+  if (cached && cached.key === key) {
     return cached.result
   }
 
-  const result = resolveDocument(document, theme)
-  cache.set(document, { key: themeKey, result })
+  const result = resolveDocument(document, selection ?? theme)
+  cache.set(document, { key, result })
 
   return result
+}
+
+export function forgetResolved(document: Document): void {
+  cache.delete(document)
 }
